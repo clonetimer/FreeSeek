@@ -1,0 +1,1 @@
+const assert=require("assert"); const {authorize}=require("../src/server/middleware/authorize"); const u={id:'1',roles:['reader','editor']}; assert.equal(authorize(['reader','editor'])(u),true); assert.equal(authorize(['reader','admin'])(u),false); assert.equal(authorize([])(u),true); assert.equal(authorize([])(null),false); console.log('ok');

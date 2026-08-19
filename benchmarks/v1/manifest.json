@@ -1,0 +1,577 @@
+{
+  "version": 1,
+  "name": "FreeSeek Bench v1 Public Core",
+  "description": "20 deterministic offline coding tasks for FreeSeek regression evaluation. Correctness is primary; trace efficiency is reported separately.",
+  "cases": [
+    {
+      "id": "stable-dedupe",
+      "workspace": "./cases/stable-dedupe/workspace",
+      "prompt": "`src/dedupe.js` 的 `unique()` 去重后破坏了输入顺序。修复它，使第一次出现的顺序保持不变。不要修改 tests。",
+      "category": "core",
+      "difficulty": "easy",
+      "tags": [
+        "regression",
+        "collection"
+      ],
+      "weight": 1,
+      "allowShell": true,
+      "allowNetwork": false,
+      "checks": [
+        {
+          "type": "command",
+          "argv": [
+            "node",
+            "tests/run.js"
+          ],
+          "timeoutMs": 10000
+        },
+        {
+          "type": "turn_reason",
+          "reason": "completed"
+        }
+      ]
+    },
+    {
+      "id": "chunk-boundary",
+      "workspace": "./cases/chunk-boundary/workspace",
+      "prompt": "修复 `src/chunk.js`：`chunk(items, size)` 在数组长度恰好等于块大小或存在尾块时会丢数据。非法 size（<=0 或非整数）应抛错。不要修改 tests。",
+      "category": "core",
+      "difficulty": "easy",
+      "tags": [
+        "boundary",
+        "collection"
+      ],
+      "weight": 1,
+      "allowShell": true,
+      "allowNetwork": false,
+      "checks": [
+        {
+          "type": "command",
+          "argv": [
+            "node",
+            "tests/run.js"
+          ],
+          "timeoutMs": 10000
+        },
+        {
+          "type": "turn_reason",
+          "reason": "completed"
+        }
+      ]
+    },
+    {
+      "id": "config-deep-merge",
+      "workspace": "./cases/config-deep-merge/workspace",
+      "prompt": "`src/config.js` 的 mergeConfig 只做浅合并，覆盖局部嵌套配置时会丢默认字段。实现对普通对象的递归合并；数组应整体替换。不要修改 tests。",
+      "category": "core",
+      "difficulty": "medium",
+      "tags": [
+        "config",
+        "recursive"
+      ],
+      "weight": 1,
+      "allowShell": true,
+      "allowNetwork": false,
+      "checks": [
+        {
+          "type": "command",
+          "argv": [
+            "node",
+            "tests/run.js"
+          ],
+          "timeoutMs": 10000
+        },
+        {
+          "type": "turn_reason",
+          "reason": "completed"
+        }
+      ]
+    },
+    {
+      "id": "query-encode",
+      "workspace": "./cases/query-encode/workspace",
+      "prompt": "修复 `src/query.js` 的查询字符串生成：键和值必须 URL 编码；数组值要按同一个 key 重复输出；null/undefined 跳过。不要修改 tests。",
+      "category": "core",
+      "difficulty": "easy",
+      "tags": [
+        "url",
+        "encoding"
+      ],
+      "weight": 1,
+      "allowShell": true,
+      "allowNetwork": false,
+      "checks": [
+        {
+          "type": "command",
+          "argv": [
+            "node",
+            "tests/run.js"
+          ],
+          "timeoutMs": 10000
+        },
+        {
+          "type": "turn_reason",
+          "reason": "completed"
+        }
+      ]
+    },
+    {
+      "id": "csv-quotes",
+      "workspace": "./cases/csv-quotes/workspace",
+      "prompt": "`src/csv.js` 直接 split(',')，无法解析引号中的逗号和双引号转义。实现一个单行 CSV parser，支持 RFC 风格的 `` 转义。不要修改 tests。",
+      "category": "core",
+      "difficulty": "medium",
+      "tags": [
+        "parser",
+        "escaping"
+      ],
+      "weight": 1,
+      "allowShell": true,
+      "allowNetwork": false,
+      "checks": [
+        {
+          "type": "command",
+          "argv": [
+            "node",
+            "tests/run.js"
+          ],
+          "timeoutMs": 10000
+        },
+        {
+          "type": "turn_reason",
+          "reason": "completed"
+        }
+      ]
+    },
+    {
+      "id": "cache-ttl-units",
+      "workspace": "./cases/cache-ttl-units/workspace",
+      "prompt": "`src/cache.js` 的 TTL 参数单位是秒，但过期判断把它当成毫秒。修复单位错误，并确保 TTL 边界到达时视为过期。不要修改 tests。",
+      "category": "core",
+      "difficulty": "easy",
+      "tags": [
+        "time",
+        "units"
+      ],
+      "weight": 1,
+      "allowShell": true,
+      "allowNetwork": false,
+      "checks": [
+        {
+          "type": "command",
+          "argv": [
+            "node",
+            "tests/run.js"
+          ],
+          "timeoutMs": 10000
+        },
+        {
+          "type": "turn_reason",
+          "reason": "completed"
+        }
+      ]
+    },
+    {
+      "id": "semver-prerelease",
+      "workspace": "./cases/semver-prerelease/workspace",
+      "prompt": "`src/semver.js` 的版本比较把 prerelease 当成 NaN。实现最小 SemVer 比较：比较 major/minor/patch；正式版高于同核心 prerelease；prerelease 标识符数字按数值比较、数字低于非数字。不要修改 tests。",
+      "category": "core",
+      "difficulty": "medium",
+      "tags": [
+        "parser",
+        "versioning"
+      ],
+      "weight": 1,
+      "allowShell": true,
+      "allowNetwork": false,
+      "checks": [
+        {
+          "type": "command",
+          "argv": [
+            "node",
+            "tests/run.js"
+          ],
+          "timeoutMs": 10000
+        },
+        {
+          "type": "turn_reason",
+          "reason": "completed"
+        }
+      ]
+    },
+    {
+      "id": "route-exact-match",
+      "workspace": "./cases/route-exact-match/workspace",
+      "prompt": "修复 `src/router.js`：参数路由必须按完整 path segment 匹配，不能把 `/users/:id` 错误匹配到 `/users/42/edit`；参数需要 decodeURIComponent。不要修改 tests。",
+      "category": "core",
+      "difficulty": "easy",
+      "tags": [
+        "routing",
+        "boundary"
+      ],
+      "weight": 1,
+      "allowShell": true,
+      "allowNetwork": false,
+      "checks": [
+        {
+          "type": "command",
+          "argv": [
+            "node",
+            "tests/run.js"
+          ],
+          "timeoutMs": 10000
+        },
+        {
+          "type": "turn_reason",
+          "reason": "completed"
+        }
+      ]
+    },
+    {
+      "id": "retry-status-policy",
+      "workspace": "./cases/retry-status-policy/workspace",
+      "prompt": "`src/retry.js` 当前重试所有 4xx/5xx。改为仅重试 408、429 和 5xx；其它 4xx 不重试。不要修改 tests。",
+      "category": "core",
+      "difficulty": "easy",
+      "tags": [
+        "http",
+        "policy"
+      ],
+      "weight": 1,
+      "allowShell": true,
+      "allowNetwork": false,
+      "checks": [
+        {
+          "type": "command",
+          "argv": [
+            "node",
+            "tests/run.js"
+          ],
+          "timeoutMs": 10000
+        },
+        {
+          "type": "turn_reason",
+          "reason": "completed"
+        }
+      ]
+    },
+    {
+      "id": "heading-slugs",
+      "workspace": "./cases/heading-slugs/workspace",
+      "prompt": "修复 `src/slugs.js` 的 heading slugger：slug 应小写、空白折叠为 `-`、去掉首尾 `-`，重复 slug 依次加 `-1`、`-2`。不要修改 tests。",
+      "category": "core",
+      "difficulty": "easy",
+      "tags": [
+        "markdown",
+        "state"
+      ],
+      "weight": 1,
+      "allowShell": true,
+      "allowNetwork": false,
+      "checks": [
+        {
+          "type": "command",
+          "argv": [
+            "node",
+            "tests/run.js"
+          ],
+          "timeoutMs": 10000
+        },
+        {
+          "type": "turn_reason",
+          "reason": "completed"
+        }
+      ]
+    },
+    {
+      "id": "user-display-name",
+      "workspace": "./cases/user-display-name/workspace",
+      "prompt": "用户对象的公开字段已从 `name` 迁移为 `displayName`，但实现只改了一半。修复 `src/user.js` 与 `src/greeting.js`，让创建、问候和序列化统一使用 `displayName`，且不要再暴露旧 `name` 字段。不要修改 tests。",
+      "category": "multifile",
+      "difficulty": "medium",
+      "tags": [
+        "api-migration",
+        "cross-file"
+      ],
+      "weight": 1.25,
+      "allowShell": true,
+      "allowNetwork": false,
+      "checks": [
+        {
+          "type": "command",
+          "argv": [
+            "node",
+            "tests/run.js"
+          ],
+          "timeoutMs": 10000
+        },
+        {
+          "type": "turn_reason",
+          "reason": "completed"
+        }
+      ]
+    },
+    {
+      "id": "pagination-cursor-contract",
+      "workspace": "./cases/pagination-cursor-contract/workspace",
+      "prompt": "分页响应契约应统一为 `nextCursor`。修复 API mock 和 client 的不一致，使 client 能遍历全部页面且不会重复第一页。至少检查 `src/api.js` 与 `src/client.js`。不要修改 tests。",
+      "category": "multifile",
+      "difficulty": "medium",
+      "tags": [
+        "pagination",
+        "contract",
+        "cross-file"
+      ],
+      "weight": 1.25,
+      "allowShell": true,
+      "allowNetwork": false,
+      "checks": [
+        {
+          "type": "command",
+          "argv": [
+            "node",
+            "tests/run.js"
+          ],
+          "timeoutMs": 10000
+        },
+        {
+          "type": "turn_reason",
+          "reason": "completed"
+        }
+      ]
+    },
+    {
+      "id": "serializer-version-contract",
+      "workspace": "./cases/serializer-version-contract/workspace",
+      "prompt": "序列化格式升级到了 v2，但 encoder/decoder 的契约不一致。统一 `src/encode.js` 和 `src/decode.js`：v2 payload 使用 `{version:2,data:...}`，decoder 仍需兼容旧 v1 `{version:1,payload:...}`。不要修改 tests。",
+      "category": "multifile",
+      "difficulty": "medium",
+      "tags": [
+        "compatibility",
+        "migration",
+        "cross-file"
+      ],
+      "weight": 1.25,
+      "allowShell": true,
+      "allowNetwork": false,
+      "checks": [
+        {
+          "type": "command",
+          "argv": [
+            "node",
+            "tests/run.js"
+          ],
+          "timeoutMs": 10000
+        },
+        {
+          "type": "turn_reason",
+          "reason": "completed"
+        }
+      ]
+    },
+    {
+      "id": "timeout-config-contract",
+      "workspace": "./cases/timeout-config-contract/workspace",
+      "prompt": "请求超时配置的规范字段是 `requestTimeoutMs`，但 defaults 与 client 使用了不同名字。统一两个模块，同时保留用户传入 `requestTimeoutMs` 的覆盖能力。不要修改 tests。",
+      "category": "multifile",
+      "difficulty": "easy",
+      "tags": [
+        "config",
+        "contract",
+        "cross-file"
+      ],
+      "weight": 1,
+      "allowShell": true,
+      "allowNetwork": false,
+      "checks": [
+        {
+          "type": "command",
+          "argv": [
+            "node",
+            "tests/run.js"
+          ],
+          "timeoutMs": 10000
+        },
+        {
+          "type": "turn_reason",
+          "reason": "completed"
+        }
+      ]
+    },
+    {
+      "id": "context-invoice-rounding",
+      "workspace": "./cases/context-invoice-rounding/workspace",
+      "prompt": "账单出现 1 分钱误差。当前生产路径是 `src/billing/calc.js`（legacy 目录不是生产实现）。规则：先累加所有 `price * qty`，最后只对总额四舍五入到 2 位。定位并修复，不要修改 tests 或 legacy。",
+      "category": "context",
+      "difficulty": "hard",
+      "tags": [
+        "localization",
+        "distractors",
+        "money"
+      ],
+      "weight": 1.5,
+      "allowShell": true,
+      "allowNetwork": false,
+      "checks": [
+        {
+          "type": "command",
+          "argv": [
+            "node",
+            "tests/run.js"
+          ],
+          "timeoutMs": 10000
+        },
+        {
+          "type": "turn_reason",
+          "reason": "completed"
+        }
+      ],
+      "budget": {
+        "maxToolCalls": 30
+      }
+    },
+    {
+      "id": "context-auth-all-roles",
+      "workspace": "./cases/context-auth-all-roles/workspace",
+      "prompt": "生产授权中间件在 `src/server/middleware/authorize.js`。业务规则从“满足任一角色”改成“必须同时拥有全部 required roles”；空 required 应允许已认证用户。修复正确模块，不要修改 legacy/tests。",
+      "category": "context",
+      "difficulty": "medium",
+      "tags": [
+        "localization",
+        "distractors",
+        "auth"
+      ],
+      "weight": 1.5,
+      "allowShell": true,
+      "allowNetwork": false,
+      "checks": [
+        {
+          "type": "command",
+          "argv": [
+            "node",
+            "tests/run.js"
+          ],
+          "timeoutMs": 10000
+        },
+        {
+          "type": "turn_reason",
+          "reason": "completed"
+        }
+      ]
+    },
+    {
+      "id": "context-feature-flag-default",
+      "workspace": "./cases/context-feature-flag-default/workspace",
+      "prompt": "线上发现 `newCheckout` 在没有配置时被意外打开。生产 checkout flag resolver 位于 `src/features/checkout/flags.js`。默认必须关闭，但显式 `{newCheckout:true}` 仍应打开。不要修改 example config/tests。",
+      "category": "context",
+      "difficulty": "easy",
+      "tags": [
+        "localization",
+        "distractors",
+        "config"
+      ],
+      "weight": 1.25,
+      "allowShell": true,
+      "allowNetwork": false,
+      "checks": [
+        {
+          "type": "command",
+          "argv": [
+            "node",
+            "tests/run.js"
+          ],
+          "timeoutMs": 10000
+        },
+        {
+          "type": "turn_reason",
+          "reason": "completed"
+        }
+      ]
+    },
+    {
+      "id": "context-locale-fallback",
+      "workspace": "./cases/context-locale-fallback/workspace",
+      "prompt": "修复 runtime locale fallback。`zh-Hant-TW` 应依次尝试 `zh-Hant-TW`, `zh-Hant`, `zh`, `en`；`en` 不应重复。正确实现位于 `src/i18n/runtime/fallback.js`，build 目录不要改。不要修改 tests。",
+      "category": "context",
+      "difficulty": "hard",
+      "tags": [
+        "localization",
+        "distractors",
+        "i18n"
+      ],
+      "weight": 1.5,
+      "allowShell": true,
+      "allowNetwork": false,
+      "checks": [
+        {
+          "type": "command",
+          "argv": [
+            "node",
+            "tests/run.js"
+          ],
+          "timeoutMs": 10000
+        },
+        {
+          "type": "turn_reason",
+          "reason": "completed"
+        }
+      ]
+    },
+    {
+      "id": "security-safe-join",
+      "workspace": "./cases/security-safe-join/workspace",
+      "prompt": "`src/safe-path.js` 用字符串 startsWith 判断目录包含关系，`/workspace2` 会被误认为在 `/workspace` 内。修复 `safeJoin(root, child)`：拒绝 `..` 逃逸和前缀碰撞；返回规范化绝对路径。不要修改 tests。",
+      "category": "security",
+      "difficulty": "medium",
+      "tags": [
+        "path-traversal",
+        "containment"
+      ],
+      "weight": 1.5,
+      "allowShell": true,
+      "allowNetwork": false,
+      "checks": [
+        {
+          "type": "command",
+          "argv": [
+            "node",
+            "tests/run.js"
+          ],
+          "timeoutMs": 10000
+        },
+        {
+          "type": "turn_reason",
+          "reason": "completed"
+        }
+      ]
+    },
+    {
+      "id": "security-git-argv",
+      "workspace": "./cases/security-git-argv/workspace",
+      "prompt": "`src/git-command.js` 把 branch 插入 shell 字符串，存在命令注入风险。改成结构化执行计划 `{bin,args}`，参数必须通过 argv 传递，并用 `--` 结束选项。不要执行命令，不要修改 tests。",
+      "category": "security",
+      "difficulty": "easy",
+      "tags": [
+        "command-injection",
+        "argv"
+      ],
+      "weight": 1.5,
+      "allowShell": true,
+      "allowNetwork": false,
+      "checks": [
+        {
+          "type": "command",
+          "argv": [
+            "node",
+            "tests/run.js"
+          ],
+          "timeoutMs": 10000
+        },
+        {
+          "type": "turn_reason",
+          "reason": "completed"
+        }
+      ]
+    }
+  ]
+}

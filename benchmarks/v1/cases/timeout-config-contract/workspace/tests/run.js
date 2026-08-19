@@ -1,0 +1,1 @@
+const assert=require("assert"); const {defaults}=require("../src/defaults"); const {options}=require("../src/client"); assert.deepStrictEqual(defaults,{requestTimeoutMs:5000,retries:2}); assert.deepStrictEqual(options(),{requestTimeoutMs:5000,retries:2}); assert.deepStrictEqual(options({requestTimeoutMs:9000}),{requestTimeoutMs:9000,retries:2}); console.log('ok');

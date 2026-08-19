@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "name": "FreeSeek Context Retrieval v1",
+  "probes": [
+    {
+      "id": "invoice-explicit",
+      "workspace": "./cases/context-invoice-rounding/workspace",
+      "query": "账单出现 1 分钱误差。当前生产路径是 `src/billing/calc.js`（legacy 目录不是生产实现）。规则：先累加所有 `price * qty`，最后只对总额四舍五入到 2 位。定位并修复，不要修改 tests 或 legacy。",
+      "targets": ["src/billing/calc.js"],
+      "tags": ["explicit-path"]
+    },
+    {
+      "id": "invoice-hidden",
+      "workspace": "./cases/context-invoice-rounding/workspace",
+      "query": "账单出现 1 分钱误差。规则：先累加所有 price * qty，最后只对总额四舍五入到 2 位。定位并修复生产实现，不要修改 tests 或 legacy。",
+      "targets": ["src/billing/calc.js"],
+      "tags": ["path-hidden", "negative-intent"]
+    },
+    {
+      "id": "auth-explicit",
+      "workspace": "./cases/context-auth-all-roles/workspace",
+      "query": "生产授权中间件在 `src/server/middleware/authorize.js`。业务规则从“满足任一角色”改成“必须同时拥有全部 required roles”；空 required 应允许已认证用户。修复正确模块，不要修改 legacy/tests。",
+      "targets": ["src/server/middleware/authorize.js"],
+      "tags": ["explicit-path"]
+    },
+    {
+      "id": "auth-hidden",
+      "workspace": "./cases/context-auth-all-roles/workspace",
+      "query": "生产授权业务规则从“满足任一角色”改成“必须同时拥有全部 required roles”；空 required 应允许已认证用户。修复正确模块，不要修改 legacy/tests。",
+      "targets": ["src/server/middleware/authorize.js"],
+      "tags": ["path-hidden", "negative-intent"]
+    },
+    {
+      "id": "flags-explicit",
+      "workspace": "./cases/context-feature-flag-default/workspace",
+      "query": "线上发现 `newCheckout` 在没有配置时被意外打开。生产 checkout flag resolver 位于 `src/features/checkout/flags.js`。默认必须关闭，但显式 `{newCheckout:true}` 仍应打开。不要修改 example config/tests。",
+      "targets": ["src/features/checkout/flags.js"],
+      "tags": ["explicit-path"]
+    },
+    {
+      "id": "flags-hidden",
+      "workspace": "./cases/context-feature-flag-default/workspace",
+      "query": "线上发现 newCheckout 在没有配置时被意外打开。默认必须关闭，但显式 {newCheckout:true} 仍应打开。定位生产 checkout flag resolver，不要修改 example config/tests。",
+      "targets": ["src/features/checkout/flags.js"],
+      "tags": ["path-hidden", "negative-intent"]
+    },
+    {
+      "id": "locale-explicit",
+      "workspace": "./cases/context-locale-fallback/workspace",
+      "query": "修复 runtime locale fallback。`zh-Hant-TW` 应依次尝试 `zh-Hant-TW`, `zh-Hant`, `zh`, `en`；`en` 不应重复。正确实现位于 `src/i18n/runtime/fallback.js`，build 目录不要改。不要修改 tests。",
+      "targets": ["src/i18n/runtime/fallback.js"],
+      "tags": ["explicit-path"]
+    },
+    {
+      "id": "locale-hidden",
+      "workspace": "./cases/context-locale-fallback/workspace",
+      "query": "修复 runtime locale fallback。zh-Hant-TW 应依次尝试 zh-Hant-TW, zh-Hant, zh, en；en 不应重复。定位正确 runtime 实现，build 目录不要改。不要修改 tests。",
+      "targets": ["src/i18n/runtime/fallback.js"],
+      "tags": ["path-hidden", "negative-intent"]
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+const assert=require("assert"); const path=require('path'); const {safeJoin}=require("../src/safe-path"); const root=path.resolve('/tmp/workspace'); assert.equal(safeJoin(root,'a/b'),path.join(root,'a/b')); assert.throws(()=>safeJoin(root,'../workspace2/secret')); assert.throws(()=>safeJoin(root,'../../etc/passwd')); console.log('ok');

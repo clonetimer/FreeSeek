@@ -1,0 +1,1 @@
+const assert=require("assert"); const {makeApi}=require("../src/api"); const {collectAll}=require("../src/client"); (async()=>{assert.deepStrictEqual(await collectAll(makeApi([[1,2],[3],[4,5]])),[1,2,3,4,5]); console.log('ok');})().catch(e=>{console.error(e);process.exit(1)});

@@ -1,0 +1,1 @@
+const assert=require("assert"); const {resolveFlags}=require("../src/features/checkout/flags"); assert.deepStrictEqual(resolveFlags(),{newCheckout:false,expressPay:false}); assert.equal(resolveFlags({newCheckout:true}).newCheckout,true); console.log('ok');

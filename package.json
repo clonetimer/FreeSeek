@@ -1,0 +1,533 @@
+{
+  "name": "freeseek-copilot",
+  "displayName": "FreeSeek — Local-first Coding Agent",
+  "description": "FreeSeek local-first, model-agnostic coding agent kernel for VS Code, CLI/Headless, Eval and Bench.",
+  "version": "0.18.0",
+  "publisher": "freeseek",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/freeseek/freeseek-copilot"
+  },
+  "icon": "icon.png",
+  "galleryBanner": {
+    "color": "#1e1e2e",
+    "theme": "dark"
+  },
+  "engines": {
+    "vscode": "^1.85.0",
+    "node": ">=18"
+  },
+  "categories": [
+    "AI",
+    "Programming Languages",
+    "Chat"
+  ],
+  "keywords": [
+    "deepseek",
+    "free",
+    "agent",
+    "copilot",
+    "ai",
+    "coding"
+  ],
+  "activationEvents": [
+    "onCommand:freesek.openChat",
+    "onView:freesek.chatView"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "freesek.openChat",
+        "title": "FreeSeek: 打开编程助手",
+        "icon": "$(comment-discussion)",
+        "category": "FreeSeek"
+      },
+      {
+        "command": "freesek.startFreeServer",
+        "title": "FreeSeek: 启动免费 DeepSeek 服务（deepseek-free-api）",
+        "category": "FreeSeek"
+      },
+      {
+        "command": "freesek.clearConversation",
+        "title": "FreeSeek: 清空当前对话",
+        "category": "FreeSeek"
+      },
+      {
+        "command": "freesek.openSessionLog",
+        "title": "FreeSeek: 打开当前会话事件日志（回放）",
+        "category": "FreeSeek"
+      },
+      {
+        "command": "freesek.newChat",
+        "title": "FreeSeek: 新建对话",
+        "category": "FreeSeek"
+      },
+      {
+        "command": "freesek.openHistory",
+        "title": "FreeSeek: 打开历史对话",
+        "category": "FreeSeek"
+      },
+      {
+        "command": "freesek.switchModel",
+        "title": "FreeSeek: 切换模型",
+        "category": "FreeSeek"
+      },
+      {
+        "command": "freesek.addProvider",
+        "title": "FreeSeek: 添加提供商",
+        "category": "FreeSeek"
+      },
+      {
+        "command": "freesek.editProviders",
+        "title": "FreeSeek: 在设置中编辑提供商",
+        "category": "FreeSeek"
+      },
+      {
+        "command": "freesek.manageMCP",
+        "title": "FreeSeek: 管理 MCP 服务",
+        "category": "FreeSeek"
+      },
+      {
+        "command": "freesek.forkSession",
+        "title": "FreeSeek: 分叉当前对话",
+        "category": "FreeSeek"
+      },
+      {
+        "command": "freesek.openCommands",
+        "title": "FreeSeek: 打开 Slash 命令",
+        "category": "FreeSeek"
+      },
+      {
+        "command": "freesek.renameSession",
+        "title": "FreeSeek: 重命名当前会话",
+        "category": "FreeSeek"
+      },
+      {
+        "command": "freesek.resumeSession",
+        "title": "FreeSeek: 恢复历史会话",
+        "category": "FreeSeek"
+      },
+      {
+        "command": "freesek.installKit",
+        "title": "FreeSeek: 安装专家套件",
+        "category": "FreeSeek"
+      },
+      {
+        "command": "freesek.addSchedule",
+        "title": "FreeSeek: 添加定时任务",
+        "category": "FreeSeek"
+      },
+      {
+        "command": "freesek.manageSchedules",
+        "title": "FreeSeek: 管理定时任务",
+        "category": "FreeSeek"
+      },
+      {
+        "command": "freesek.manageHookifyRules",
+        "title": "FreeSeek: 管理 Hookify 规则",
+        "category": "FreeSeek"
+      },
+      {
+        "command": "freesek.manageKits",
+        "title": "FreeSeek: 管理已安装专家套件",
+        "category": "FreeSeek"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "freesek",
+          "title": "FreeSeek",
+          "icon": "$(comment-discussion)"
+        }
+      ]
+    },
+    "views": {
+      "freesek": [
+        {
+          "type": "webview",
+          "id": "freesek.chatView",
+          "name": "编程助手",
+          "icon": "$(comment-discussion)",
+          "contextualTitle": "FreeSeek"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "FreeSeek",
+      "properties": {
+        "freesek.provider": {
+          "type": "string",
+          "default": "free",
+          "enum": [
+            "free",
+            "official"
+          ],
+          "description": "【已废弃，仅供旧版兼容】模型接入方式。新增多提供商能力后，请改用 freesek.providers（可配置多个提供商、每个多个模型，并在对话中即时切换）。"
+        },
+        "freesek.providers": {
+          "type": "array",
+          "default": [
+            {
+              "id": "deepseek-official",
+              "name": "DeepSeek 官方",
+              "baseUrl": "https://api.deepseek.com",
+              "apiKey": "${secret:freesek.legacy.officialApiKey}",
+              "toolMode": "native",
+              "models": [
+                {
+                  "id": "deepseek-v4-flash",
+                  "name": "DeepSeek V4 Flash"
+                },
+                {
+                  "id": "deepseek-v4-pro",
+                  "name": "DeepSeek V4 Pro"
+                }
+              ]
+            },
+            {
+              "id": "deepseek-free",
+              "name": "FreeSeek 本地（逆向）",
+              "baseUrl": "http://127.0.0.1:8000/v1",
+              "apiKey": "${secret:freesek.legacy.freeUserToken}",
+              "toolMode": "react",
+              "models": [
+                {
+                  "id": "deepseek-chat",
+                  "name": "DeepSeek Chat（免费）"
+                }
+              ]
+            },
+            {
+              "id": "lm-studio",
+              "name": "LM Studio 本地",
+              "baseUrl": "http://127.0.0.1:1234/v1",
+              "apiKey": "lm-studio",
+              "toolMode": "native",
+              "autoDiscoverModels": true,
+              "models": [
+                {
+                  "id": "qwen2.5-coder-7b-instruct",
+                  "name": "Qwen2.5-Coder 7B（autoDiscoverModels=true 时自动拉取你 LM Studio 实际加载的全部模型）"
+                }
+              ]
+            },
+            {
+              "id": "tencent-hunyuan",
+              "name": "腾讯云混元",
+              "baseUrl": "https://api.hunyuan.cloud.tencent.com/v1",
+              "apiKey": "${env:TENCENT_HUNYUAN_API_KEY}",
+              "toolMode": "native",
+              "format": "openai",
+              "authType": "bearer",
+              "models": [
+                {
+                  "id": "hunyuan-turbo",
+                  "name": "腾讯混元 Turbo（速度快）"
+                },
+                {
+                  "id": "hunyuan-pro",
+                  "name": "腾讯混元 Pro（更强）"
+                },
+                {
+                  "id": "hunyuan-standard",
+                  "name": "腾讯混元 Standard（均衡）"
+                }
+              ]
+            }
+          ],
+          "description": "多提供商配置（数组）。每项：id/name/baseUrl/apiKey(支持 ${env:VAR} 或 ${setting:freesek.xxx} 插值)/toolMode(native=原生 function calling | react=ReAct 文本协议)/models[](每项 {id, name?})。可在设置直接编辑，或运行「FreeSeek: 添加提供商」向导。当前选中的 {providerId, modelId} 存于 freesek.activeModel。"
+        },
+        "freesek.activeModel": {
+          "type": "object",
+          "default": null,
+          "description": "当前选中的 {providerId, modelId}（由「FreeSeek: 切换模型」自动写入）。无需手动改。"
+        },
+        "freesek.freeBaseUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8000/v1",
+          "description": "免费服务的 OpenAI 兼容 Base URL（deepseek-free-api 默认端口 8000）。"
+        },
+        "freesek.freeApiLocalPath": {
+          "type": "string",
+          "default": "",
+          "description": "本地 deepseek-free-api 源码目录（可选）。留空则使用扩展内置的 vendored 源码（位于扩展安装目录下的 deepseek-free-api/）；若你自行更新了该服务源码，可填写其绝对路径（如 E:\\timer\\deepseek-free\\jonnyquan），「启动免费 DeepSeek 服务」的 Node 方式会在该目录 npm install && build && start。"
+        },
+        "freesek.autoStartFreeServer": {
+          "type": "boolean",
+          "default": false,
+          "description": "【实验功能，默认关闭】扩展激活时自动检测并启动内置 DeepSeek Web 兼容服务。该适配依赖网页协议，可能随上游变化失效；建议优先使用官方 API/OpenAI 兼容 Provider，需要时再手动开启。"
+        },
+        "freesek.freeUserToken": {
+          "type": "string",
+          "default": "",
+          "description": "【已废弃，仅用于迁移】旧版 DeepSeek Web userToken。激活后 FreeSeek 会迁入 VS Code SecretStorage 并清空此设置；新配置不要在 settings.json 中保存 token。"
+        },
+        "freesek.freeModel": {
+          "type": "string",
+          "default": "deepseek-chat",
+          "description": "免费服务的模型名。可选：deepseek-chat / deepseek-reasoner / deepseek-v3 等。"
+        },
+        "freesek.officialBaseUrl": {
+          "type": "string",
+          "default": "https://api.deepseek.com",
+          "description": "DeepSeek 官方 API Base URL。"
+        },
+        "freesek.officialApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "【已废弃，仅用于迁移】旧版 DeepSeek 官方 API Key。激活后 FreeSeek 会迁入 VS Code SecretStorage 并清空此设置；请通过 FreeSeek Provider UI 保存凭据。"
+        },
+        "freesek.officialModel": {
+          "type": "string",
+          "default": "deepseek-v4-flash",
+          "description": "DeepSeek 官方模型名。当前推荐：deepseek-v4-flash / deepseek-v4-pro。"
+        },
+        "freesek.maxSteps": {
+          "type": "number",
+          "default": 25,
+          "description": "Agent 单轮最多自动执行多少步工具调用，防止死循环。"
+        },
+        "freesek.allowShell": {
+          "type": "boolean",
+          "default": false,
+          "description": "是否允许 Agent 执行终端命令（高危，默认关闭，需手动开启）。"
+        },
+        "freesek.allowNetwork": {
+          "type": "boolean",
+          "default": true,
+          "description": "是否允许 Agent 联网检索与抓取网页（web_search / web_fetch）。独立于 allowShell：联网是纯 HTTP 请求，非终端命令。默认开启；设为 false 可彻底禁用 Agent 联网（沙箱/敏感环境）。"
+        },
+        "freesek.debugVerbose": {
+          "type": "boolean",
+          "default": false,
+          "description": "调试：在「输出 → FreeSeek Debug」中打印每次请求的完整请求体 JSON（可能包含对话内容，仅排障时开启）。关闭时仅打印请求概要（provider/model/消息数量/每条 role+长度/tool 配对预检）。"
+        },
+        "freesek.browserPort": {
+          "type": "number",
+          "default": 9222,
+          "description": "browser 工具的 CDP 调试端口。若该端口上已有带 --remote-debugging-port 的 Chrome/Edge 在运行则直接复用（含登录态），否则自动拉起 headless 实例。"
+        },
+        "freesek.offloadThreshold": {
+          "type": "number",
+          "default": 50000,
+          "description": "工具输出卸载阈值（字符）。超过此大小的工具结果（如 grep / read_file）会落盘到 offload 目录，上下文只保留引用路径，避免撑爆上下文预算。"
+        },
+        "freesek.autoVerify": {
+          "type": "boolean",
+          "default": true,
+          "description": "质量门禁：为 true 时，Agent 在完成代码改动后会自动调用 verify 工具运行 typecheck/lint/test 验证，失败则定位错误并修复重跑，直到通过。这是「写→跑→修」闭环的关键开关，确保交付的是验证过的结果。"
+        },
+        "freesek.autoDistillSkills": {
+          "type": "boolean",
+          "default": true,
+          "description": "技能进化闭环：为 true 时，会话结束后自动从本次会话沉淀「可复用技能」（写入 ~/.freesek/skills/<name>/SKILL.md，标为 pending）。新技能需人工审核（将 status 改为 active）或后续验证确认后才被激活，防止未经验证的自生成技能退化。"
+        },
+        "freesek.agentPresets": {
+          "type": "object",
+          "default": {},
+          "description": "自定义 Agent 预设（对齐 CodeBuddy 自定义 Agent）：为 spawn_agent 的 role 提供自定义角色。每项：{ \"<roleKey>\": { \"body\": \"角色提示词\", \"tools\": [\"工具名\"], \"model\": \"模型id\", \"provider\": \"提供商id\" } }。model/provider 可选：声明后该角色派发时自动绑定指定模型（多模型分工，如 plan 用便宜模型、executor 用强模型），省略则用全局活动模型。覆盖内置同名预设。"
+        },
+        "freesek.systemPrompt": {
+          "type": "string",
+          "default": "",
+          "description": "自定义系统提示词；留空使用内置的编程助手提示词。"
+        },
+        "freesek.contextBudget": {
+          "type": "number",
+          "default": 32000,
+          "description": "Layer 7 上下文预算（token 估算值）。使用率达到 70% 时模型会收到预警，达到 85% 时自动分级压缩早期历史。"
+        },
+        "freesek.contextPlanner": {
+          "type": "string",
+          "enum": [
+            "off",
+            "v1",
+            "v1.1",
+            "v1.2"
+          ],
+          "default": "off",
+          "description": "Context Planner：off 保留原始 grep/read_file agentic search；v1 为 Repo Map + Symbol + Dependency；v1.1 修正 negative-intent/ranking；v1.2 保持 v1.1 retrieval，仅改为结构化 evidence + tool discipline 呈现。默认 off，需以真实模型 Bench A/B 决定推广。"
+        },
+        "freesek.contextPlannerBudget": {
+          "type": "number",
+          "default": 3500,
+          "minimum": 256,
+          "maximum": 12000,
+          "description": "Context Planner 每个 Agent run 最多注入的启发式 token 预算。建议 2000–5000；过大会抵消检索节省。"
+        },
+        "freesek.maxWallClockMs": {
+          "type": "number",
+          "default": 600000,
+          "description": "Layer 7 三维预算之墙钟上限（毫秒，默认 600000=10 分钟）。单次 Agent 回合超过此时长自动停止，避免卡死。"
+        },
+        "freesek.theme": {
+          "type": "string",
+          "enum": [
+            "default",
+            "genshin",
+            "wuthering",
+            "academic",
+            "industrial"
+          ],
+          "enumDescriptions": [
+            "默认：跟随 VS Code 编辑器主题",
+            "原神：暖米金、柔和渐变、圆润",
+            "鸣潮：黑金冷冽、科技切割感",
+            "学术：米白纸张、衬线字体、墨色",
+            "工业：灰蓝钢铁、粗边框、等宽字体"
+          ],
+          "default": "default",
+          "description": "面板主题风格。可在设置面板的主题选择器中实时切换。"
+        },
+        "freesek.storageDir": {
+          "type": "string",
+          "default": "",
+          "description": "历史会话/转录/用户记忆的存储目录。留空=使用 VS Code 全局存储（globalStorage\\freeseek.freeseek-copilot\\freesek）；设置后（如 ~/.freeseek 或绝对路径）数据存到该目录，首次切换自动迁移已有数据。修改后需 Reload Window 生效。"
+        },
+        "freesek.autoFormat": {
+          "type": "boolean",
+          "default": true,
+          "description": "Layer 2 钩子：编辑文件（edit_file / write_file）后自动用 VS Code 注册的 formatter 格式化，失败则静默跳过。"
+        },
+        "freesek.mcpServers": {
+          "type": "array",
+          "default": [],
+          "description": "Layer 4 外部 MCP server 配置（数组）。每项：name(唯一标识) / transport(\"stdio\"|\"http\") / command+args+env(stdio) 或 url(http)。激活时自动连接并 list_tools，工具以 mcp__<name>__<tool> 注入工具集。server 不可用不影响内置工具。"
+        },
+        "freesek.mode": {
+          "type": "string",
+          "enum": [
+            "coder",
+            "craft",
+            "plan",
+            "ask"
+          ],
+          "enumDescriptions": [
+            "Coder（编码）：专职需求理解 + 代码生成，权限等同 Craft，可写文件 / 执行命令（默认）",
+            "Craft（制作）：完整能力，可写文件 / 执行命令",
+            "Plan（规划）：只读调研 + 产出实施方案，禁止写文件 / 执行命令",
+            "Ask（问答）：纯问答，只用只读工具查信息，不写不改不执行"
+          ],
+          "default": "coder",
+          "description": "对话模式（对齐 CodeBuddy / Cline 三态 + Coder 专职编码）：coder=编码（专职需求理解+代码生成，权限等同 craft，默认）；craft=制作（完整能力，可执行命令）；plan=规划（只读+出方案）；ask=问答（纯只读问答）。也可在对话面板用 Plan/Ask/Craft/Coder 按钮实时切换。"
+        },
+        "freesek.sandboxMode": {
+          "type": "string",
+          "enum": [
+            "off",
+            "readonly",
+            "sandbox"
+          ],
+          "default": "off",
+          "description": "OS 受限执行（对标 Claude Code Seatbelt & Codex 沙箱）：off=原样执行（仅依赖 L2 危险命令拦截）；readonly=完全禁止 run_command（最保守）；sandbox=走 OS 级沙箱包装——macOS 用 sandbox-exec(Seatbelt)、Linux/WSL2 用 bubblewrap(bwrap)，内核级强制文件/网络隔离，并叠加进程级 env 过滤兜底。⚠️ Windows 无原生 OS 沙箱，sandbox 档会软降级为「进程级受限执行」并告警（可借 Docker Desktop 获得容器级隔离）。"
+        },
+        "freesek.sandboxNetwork": {
+          "type": "object",
+          "default": {
+            "mode": "off",
+            "allowedDomains": [],
+            "allowLocalBinding": true
+          },
+          "description": "sandbox 档的网络出网策略：mode 可选 off(完全禁网，默认，最安全) / localhost(仅允许本机开发场景；Linux bwrap 后端当前 fail-closed 为独立网络命名空间，可能比“仅 localhost”更严格) / allow(放开网络)。allowedDomains 为未来代理白名单预留字段。"
+        },
+        "freesek.sandboxFailIfUnavailable": {
+          "type": "boolean",
+          "default": false,
+          "description": "OS 沙箱引擎缺失时的行为（托管部署安全闸门，对标 Claude Code failIfUnavailable）：true=命令被安全网关硬拦截；false(默认)=软降级为进程级受限执行并告警，不阻断开发。"
+        },
+        "freesek.commandTimeout": {
+          "type": "number",
+          "default": 120000,
+          "description": "run_command 硬超时（毫秒，默认 120000=2 分钟）。命令超过此时长将被终止，防止挂起 / 资源耗尽。sandbox 档同样受此约束。"
+        },
+        "freesek.allowRules": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "权限放行规则（正则数组，对标 Claude Code 的 allow 权限规则）：对「工具名 + 参数 JSON」做正则匹配，命中则跳过 L2 危险命令硬阻断并直接放行。例如 [\"^run_command .*npm test\", \"^read_file\"]。与 denyRules 配合，实现细粒度权限控制。"
+        },
+        "freesek.denyRules": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "权限拒绝规则（正则数组，对标 Claude Code 的 deny 权限规则）：对「工具名 + 参数 JSON」做正则匹配，命中则硬阻断该工具调用（优先级高于 allowRules 与危险命令拦截）。例如 [\"^run_command .*rm -rf\", \"^write_file .*\\.env\"]。"
+        },
+        "freesek.allowCommandHooks": {
+          "type": "boolean",
+          "default": false,
+          "description": "是否允许 hookify 的 action=command 规则执行外部命令（对标 QwenWork hooks 的外部命令协议）。默认关闭；开启后仅在命中 command 规则时执行用户自定义命令，命令退出码 0=成功/2=阻塞/其他=警告。"
+        },
+        "freesek.autoCheckpoint": {
+          "type": "boolean",
+          "default": true,
+          "description": "自动 pre-edit Checkpoint：每次 write_file/edit_file 前在 FreeSeek 全局存储中的独立 shadow Git 仓库记录工作区快照，不触碰用户仓库的 branch/index/stash，可用 rewind 显式恢复。"
+        },
+        "freesek.confirmFileWrites": {
+          "type": "boolean",
+          "default": false,
+          "description": "文件写入确认（对标 Claude Code 的编辑权限弹窗）：为 true 时，每次 write_file/edit_file 都会弹出权限确认框（允许/总是允许/拒绝/总是拒绝），deny 规则仍生效；为 false（默认）时，文件写入默认自动放行（仅 deny 规则可硬阻断），与 Claude Code 默认行为一致，避免每次编辑都需手动点确认。"
+        },
+        "freesek.soundStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "会话开始提示音：发送任务、Agent 开始执行时播放短提示音（Web Audio 合成，可在对话内设置面板关闭）。"
+        },
+        "freesek.soundDone": {
+          "type": "boolean",
+          "default": true,
+          "description": "会话完成提示音：任务完成 / 停止 / 出错时播放提示音（Web Audio 合成，可在对话内设置面板关闭）。"
+        },
+        "freesek.importAutoRead": {
+          "type": "boolean",
+          "default": true,
+          "description": "导入 Codex / Claude Code 对话后，自动让 Agent 通读工作区关键文件并生成状态摘要，便于无缝继续对话。可在设置面板关闭。"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "node esbuild.js --production",
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "dev:webview": "node scripts/webview-dev.mjs",
+    "typecheck": "tsc -p tsconfig.check.json",
+    "check": "node scripts/check.mjs",
+    "test": "node scripts/test.mjs",
+    "package": "vsce package",
+    "smoke": "node scripts/smoke.mjs",
+    "smoke:package": "node scripts/smoke.mjs --package",
+    "release": "node scripts/release.mjs",
+    "test:typecheck": "tsc -p tsconfig.tests.json",
+    "headless": "node dist/freeseek-headless.js",
+    "eval": "node dist/freeseek-eval.js",
+    "bench": "node dist/freeseek-bench.js",
+    "bench:deepseek-context": "node scripts/deepseek-context-ab.mjs",
+    "cli": "node dist/freeseek-headless.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.9.2",
+    "dompurify": "^3.4.13",
+    "esbuild": "^0.21.0",
+    "highlight.js": "^11.9.0",
+    "marked": "^16.4.2",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "mermaid": "^11.16.1",
+    "iconv-lite": "^0.6.3"
+  },
+  "bin": {
+    "freeseek": "./dist/freeseek-headless.js",
+    "freeseek-eval": "./dist/freeseek-eval.js",
+    "freeseek-bench": "./dist/freeseek-bench.js"
+  }
+}

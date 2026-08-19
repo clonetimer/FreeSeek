@@ -1,0 +1,1 @@
+const assert=require("assert"); const {invoiceTotal}=require("../src/billing/calc"); assert.equal(invoiceTotal([{price:0.335,qty:1},{price:0.335,qty:1},{price:0.335,qty:1}]),1.01); assert.equal(invoiceTotal([{price:10.10,qty:2},{price:0.05,qty:1}]),20.25); console.log('ok');

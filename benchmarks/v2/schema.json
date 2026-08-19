@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://freeseek.dev/schemas/bench-v2.json",
+  "title": "FreeSeek Bench v2 manifest",
+  "type": "object",
+  "required": ["version", "name", "cases"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 2 },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "visibility": { "enum": ["public", "private"] },
+    "cases": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/case" } }
+  },
+  "$defs": {
+    "gitSource": {
+      "type": "object",
+      "required": ["kind", "url", "commit"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "git" },
+        "url": { "type": "string", "pattern": "^(https|file)://" },
+        "commit": { "type": "string", "pattern": "^(?:[A-Fa-f0-9]{40}|[A-Fa-f0-9]{64})$" },
+        "goldCommit": { "type": "string", "pattern": "^(?:[A-Fa-f0-9]{40}|[A-Fa-f0-9]{64})$" },
+        "subdir": { "type": "string", "minLength": 1 }
+      }
+    },
+    "localSource": {
+      "type": "object",
+      "required": ["kind", "path"],
+      "additionalProperties": false,
+      "properties": { "kind": { "const": "local" }, "path": { "type": "string", "minLength": 1 } }
+    },
+    "case": {
+      "type": "object",
+      "required": ["id", "source", "prompt", "category", "difficulty"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+        "source": { "oneOf": [{ "$ref": "#/$defs/localSource" }, { "$ref": "#/$defs/gitSource" }] },
+        "prompt": { "type": "string", "minLength": 1 },
+        "category": { "enum": ["core", "multifile", "context", "security"] },
+        "difficulty": { "enum": ["easy", "medium", "hard"] },
+        "tags": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "weight": { "type": "number", "exclusiveMinimum": 0 },
+        "allowShell": { "type": "boolean" },
+        "allowNetwork": { "type": "boolean" },
+        "checks": { "type": "array", "items": { "type": "object", "required": ["type"] } },
+        "budget": { "type": "object" },
+        "provenance": { "type": "object" }
+      }
+    }
+  }
+}

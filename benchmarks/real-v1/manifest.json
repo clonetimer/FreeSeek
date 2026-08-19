@@ -1,0 +1,85 @@
+{
+  "version": 2,
+  "name": "FreeSeek Real Repo v1",
+  "visibility": "public",
+  "description": "Curated historical merged-PR tasks pinned to immutable public Git commits. Repository source is fetched at runtime and is not redistributed with FreeSeek.",
+  "cases": [
+    {
+      "id": "escape-string-regexp-unicode-hyphen",
+      "source": {
+        "kind": "git",
+        "url": "https://github.com/sindresorhus/escape-string-regexp.git",
+        "commit": "5085b257c801507460270b747f645276fbc1d937",
+        "goldCommit": "b58ff74ffb3ea104dd91614e982d16f6d5bab21a"
+      },
+      "prompt": "Fix hyphen escaping so the escaped output remains valid when used to construct a JavaScript RegExp with the Unicode (`u`) flag. A plain `\\-` escape is not valid outside a character class in Unicode mode. Preserve the existing escaping behavior for the other regexp metacharacters.",
+      "category": "core",
+      "difficulty": "medium",
+      "tags": ["real-repo", "historical-pr", "javascript", "regexp"],
+      "weight": 1.5,
+      "allowShell": false,
+      "allowNetwork": false,
+      "provenance": {
+        "repository": "sindresorhus/escape-string-regexp",
+        "pullRequest": 21,
+        "issue": 20,
+        "license": "MIT"
+      },
+      "checks": [
+        { "type": "host_node", "script": "./verifiers/escape-string-regexp-unicode-hyphen.mjs" },
+        { "type": "turn_reason", "reason": "completed" }
+      ]
+    },
+    {
+      "id": "p-defer-unbound-method-typing",
+      "source": {
+        "kind": "git",
+        "url": "https://github.com/sindresorhus/p-defer.git",
+        "commit": "0abf7f56337a450cbff45074dd8c83f8ace4726c",
+        "goldCommit": "ba0176333fe90eef16557239a728485bfc065f50"
+      },
+      "prompt": "Update the TypeScript declaration so destructuring `resolve` or `reject` from the deferred object does not look like an unbound method. The runtime functions do not depend on an object receiver; express that fact in the typings without changing runtime behavior.",
+      "category": "core",
+      "difficulty": "easy",
+      "tags": ["real-repo", "historical-pr", "typescript", "typing"],
+      "weight": 1,
+      "allowShell": false,
+      "allowNetwork": false,
+      "provenance": {
+        "repository": "sindresorhus/p-defer",
+        "pullRequest": 9,
+        "license": "MIT"
+      },
+      "checks": [
+        { "type": "host_node", "script": "./verifiers/p-defer-unbound-method-typing.mjs" },
+        { "type": "turn_reason", "reason": "completed" }
+      ]
+    },
+    {
+      "id": "is-stream-http-instances",
+      "source": {
+        "kind": "git",
+        "url": "https://github.com/sindresorhus/is-stream.git",
+        "commit": "6913e344ab2dd63041bb7c03095876ce5a7e0a8b",
+        "goldCommit": "57f01fe7158b55c6b05f65f510dd7bcb5927a1ce"
+      },
+      "prompt": "Make the stream predicates recognize Node.js HTTP stream instances such as IncomingMessage, OutgoingMessage and ServerResponse. Prefer documented stream API fields instead of relying on private `_read`/`_write` state, while preserving correct readable/writable/duplex distinctions.",
+      "category": "multifile",
+      "difficulty": "hard",
+      "tags": ["real-repo", "historical-pr", "javascript", "node-streams", "http"],
+      "weight": 2,
+      "allowShell": false,
+      "allowNetwork": false,
+      "provenance": {
+        "repository": "sindresorhus/is-stream",
+        "pullRequest": 21,
+        "issue": 8,
+        "license": "MIT"
+      },
+      "checks": [
+        { "type": "host_node", "script": "./verifiers/is-stream-http-instances.mjs" },
+        { "type": "turn_reason", "reason": "completed" }
+      ]
+    }
+  ]
+}

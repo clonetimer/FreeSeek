@@ -1,0 +1,30 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "npm: watch",
+      "type": "npm",
+      "script": "watch",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "typescript",
+        "pattern": {
+          "regexp": "^([^\\s].*)\\((\\d+),(\\d+)\\): (.*)$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "watching",
+          "endsPattern": "watch: build complete|watching"
+        }
+      },
+      "presentation": { "reveal": "never", "panel": "dedicated" }
+    },
+    {
+      "label": "npm: compile",
+      "type": "npm",
+      "script": "compile",
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared" }
+    }
+  ]
+}

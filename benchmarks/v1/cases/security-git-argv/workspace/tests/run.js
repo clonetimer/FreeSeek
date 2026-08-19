@@ -1,0 +1,1 @@
+const assert=require("assert"); const {checkoutCommand}=require("../src/git-command"); assert.deepStrictEqual(checkoutCommand('feature/x'),{bin:'git',args:['checkout','--','feature/x']}); assert.deepStrictEqual(checkoutCommand('x; rm -rf /'),{bin:'git',args:['checkout','--','x; rm -rf /']}); console.log('ok');

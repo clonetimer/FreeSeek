@@ -1,0 +1,1 @@
+const assert=require("assert"); const {fallbackChain}=require("../src/i18n/runtime/fallback"); assert.deepStrictEqual(fallbackChain('zh-Hant-TW'),['zh-Hant-TW','zh-Hant','zh','en']); assert.deepStrictEqual(fallbackChain('fr-CA'),['fr-CA','fr','en']); assert.deepStrictEqual(fallbackChain('en'),['en']); console.log('ok');

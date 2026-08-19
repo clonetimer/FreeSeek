@@ -1,0 +1,1 @@
+const path=require('path'); exports.safeJoin=(root,child)=>{const base=path.resolve(root); const target=path.resolve(base,child); const rel=path.relative(base,target); if(rel==='..'||rel.startsWith(`..${path.sep}`)||path.isAbsolute(rel)) throw new Error('outside'); return target;};

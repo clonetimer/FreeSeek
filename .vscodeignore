@@ -1,0 +1,66 @@
+.vscode/**
+/out/**
+node_modules/**
+src/**
+
+# 重新包含内置 deepseek-free-api 服务端「运行必需」文件（dist 已预构建，无需在用户机 rebuild）
+!deepseek-free-api/package.json
+!deepseek-free-api/package-lock.json
+!deepseek-free-api/libs.d.ts
+!deepseek-free-api/Dockerfile
+!deepseek-free-api/docker-compose.yml
+!deepseek-free-api/.dockerignore
+!deepseek-free-api/.gitignore
+!deepseek-free-api/README.md
+!deepseek-free-api/public/**
+!deepseek-free-api/dist/**
+
+# 排除该服务的依赖与元数据、以及源码（运行只需 dist，无需把服务端 src 打进包）
+deepseek-free-api/node_modules/**
+deepseek-free-api/..npmcache/**
+deepseek-free-api/.npmcache/**
+deepseek-free-api/.github/**
+deepseek-free-api/.git/**
+deepseek-free-api/doc/**
+deepseek-free-api/vercel.json
+deepseek-free-api/yarn.lock
+deepseek-free-api/tsconfig.json
+deepseek-free-api/src/**
+deepseek-free-api/configs/**
+
+# 调试 / 构建 / 文档产物不进包
+esbuild.js
+tsconfig.json
+tsconfig.check.json
+.gitignore
+.git/**
+*.vsix
+*.pdf
+project-template/**
+dist/*.map
+# 调试 / 探测脚本不进包
+_debug*
+_probe*
+_tmp_*
+_tmp_out/**
+_verify_*
+check_dist.js
+check_vsix*.js
+# 开发期工具链 / 测试不进包（运行时零依赖，发布只用 dist/ + deepseek-free-api/dist）
+scripts/**
+tests/**
+experiments/**
+
+# benchmarks/v1/**、benchmarks/real-v1/**、benchmarks/v2/** 是 freeseek-bench CLI 的运行时数据，必须保留在发布包。
+# Private holdout 必须位于仓库外；即使误放到这里也禁止进入 VSIX。
+benchmarks/private/**
+.freesek-holdout/**
+
+# FreeSeek 运行态/开发态绝不能进入发布包
+.agent/**
+webview-dev/**
+**/*.map
+**/*.vsix
+releases/**
+.trash/**
+*.log
