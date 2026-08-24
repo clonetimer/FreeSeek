@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.check.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "apps/desktop/dist",
+    "rootDir": ".",
+    "module": "commonjs",
+    "target": "ES2020",
+    "types": ["node"],
+    "sourceMap": true
+  },
+  "include": [
+    "apps/desktop/src",
+    "src/hosts/desktop",
+    "src/hosts/acp/protocol.ts",
+    "src/kernel/host-capabilities.ts"
+  ],
+  "exclude": ["node_modules", "apps/desktop/dist"]
+}

@@ -57,6 +57,11 @@ export function ensureCheckpointStore(root: string, storageBase?: string): void 
   execFileSync("git", ["init", "--quiet"], { cwd: root, env, stdio: "ignore" });
   execFileSync("git", ["config", "user.email", "freesek@local"], { cwd: root, env, stdio: "ignore" });
   execFileSync("git", ["config", "user.name", "FreeSeek Checkpoint"], { cwd: root, env, stdio: "ignore" });
+  // Shadow checkpoints must not inherit the user's global core.autocrlf policy. Otherwise a
+  // byte-identical LF snapshot created on Windows can be materialized/rewound as CRLF, which
+  // makes time-travel behavior depend on machine Git configuration rather than the snapshot.
+  // Repository .gitattributes still applies when it explicitly declares an eol policy.
+  execFileSync("git", ["config", "core.autocrlf", "false"], { cwd: root, env, stdio: "ignore" });
   const info = path.join(dir, "info");
   fs.mkdirSync(info, { recursive: true });
   // shadow repo 自身及用户 Git 元数据绝不能被快照；.agent/tmp 也是运行时临时产物。

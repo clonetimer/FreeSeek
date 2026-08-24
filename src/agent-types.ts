@@ -57,7 +57,8 @@ export interface AgentCallbacks {
    */
   onPermissionRequest?: (
     toolName: string,
-    input: any
+    input: any,
+    callId?: string
   ) => Promise<{ allow: boolean; persist?: "allow" | "deny"; reason?: string }>;
   signal?: AbortSignal;
 }

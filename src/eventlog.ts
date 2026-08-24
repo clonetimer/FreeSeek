@@ -43,9 +43,23 @@ export interface SessionEventDataMap {
   "tool/message": { message: ChatMessage; name: string };
   "tool/call": { callId?: string; name: string; args: unknown };
   "tool/result": { callId?: string; name: string; result: string; blocked?: string; timedOut?: boolean; durationMs?: number };
+  "presentation/file_evidence": {
+    callId: string;
+    evidenceId: string;
+    file: string;
+    path: string;
+    kind: "read" | "create" | "write" | "edit" | "delete";
+    added?: number;
+    removed?: number;
+    original?: string;
+    applied?: string;
+    deliverable: boolean;
+  };
   "approval/request": { callId?: string; name: string; category: "tool" | "mcp"; args?: unknown };
   "approval/result": { callId?: string; name: string; category: "tool" | "mcp"; allow: boolean; persist?: string; reason?: string };
   tool_timeout: { name: string; timeoutMs: number };
+  "extension/lease": { leaseId: string; generations: Array<{ id: string; generation: number; version: string }> };
+  "extension/release": { leaseId: string; generations: Array<{ id: string; generation: number; version: string }> };
   "turn/start": { turnId: string; messageCount: number; startedAt: number };
   "turn/end": { turnId: string; reason: "completed" | "budget" | "aborted" | "error"; steps: number; endedAt: number; error?: string };
   "step/start": { turnId: string; step: number; messageCount: number; tokens: number };

@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
 
-export { resolveSafe } from "../path-safety";
+export { resolveSafe, resolveSafeInRoots, canonicalWorkspaceRoots } from "../path-safety";
 
 /**
  * Safe-Delete：把文件/目录移入系统回收站（可恢复），而非永久删除。

@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { resolveSafe, grepWalk, MAX_GREP_FILE_BYTES } from "../src/tools/fs_utils";
+import { resolveSafe, resolveSafeInRoots, grepWalk, MAX_GREP_FILE_BYTES } from "../src/tools/fs_utils";
 import { normalizeArgsKey } from "../src/agent";
 import { ToolRuntime } from "../src/tool-runtime";
 import { ToolRegistry } from "../src/tool-registry";
@@ -62,6 +62,32 @@ test("resolveSafe: 软链接指向工作区内仍允许", (t) => {
     const resolved = resolveSafe(root, "to_inner/file.txt");
     assert.ok(resolved.startsWith(root), "应仍位于工作区内");
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("resolveSafeInRoots: additional root 仅允许显式授权绝对路径", () => {
+  const primary = tmpRoot();
+  const extra = tmpRoot();
+  const outside = tmpRoot();
+  try {
+    const allowed = path.join(extra, "allowed.txt");
+    fs.writeFileSync(allowed, "ok", "utf8");
+    const resolved = resolveSafeInRoots(primary, [extra], allowed);
+    assert.equal(resolved.path, fs.realpathSync(allowed));
+    assert.equal(resolved.root, fs.realpathSync(extra));
+    assert.throws(
+      () => resolveSafeInRoots(primary, [extra], path.join(outside, "blocked.txt")),
+      /未授权工作区|路径越界/
+    );
+    assert.equal(
+      resolveSafeInRoots(primary, [extra], "relative.txt").root,
+      fs.realpathSync(primary),
+      "相对路径必须继续锚定主工作区"
+    );
+  } finally {
+    fs.rmSync(primary, { recursive: true, force: true });
+    fs.rmSync(extra, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
 });
 
 // ───────────────────────── 性能：grep 单文件上限 ─────────────────────────

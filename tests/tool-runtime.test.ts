@@ -11,6 +11,7 @@ import { ToolRegistry, type ToolExecutorOverrides } from "../src/tool-registry";
 import { BUILTIN_TOOL_RUNTIME_SPECS, getToolRuntimeSpec } from "../src/tool-runtime-spec";
 import { TOOL_DEFINITIONS } from "../src/tools/defs";
 import type { ToolDefinition } from "../src/provider";
+import { ExtensionRuntime } from "../src/kernel/extensions/runtime";
 
 function root(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "fs-runtime-"));
@@ -86,6 +87,39 @@ test("Runtime 宿主元数据不会泄漏进模型 ToolDefinition", () => {
     assert.equal("concurrency" in d.function, false);
   }
   assert.equal(getToolRuntimeSpec("run_code").timeoutMs, 300_000);
+});
+
+test("Runtime 将 provider callId 精确传给文件证据回调", async () => {
+  const r = root();
+  try {
+    const seen: Array<{ kind: string; callId?: string }> = [];
+    const runtime = makeRuntime(r, {
+      context: {
+        runtime: { autoFormat: false },
+        onFileRead: (_file: string, _path: string, callId?: string) => seen.push({ kind: "read", callId }),
+        onFileDiff: (_info: unknown, callId?: string) => seen.push({ kind: "diff", callId }),
+      },
+      executors: {
+        read_file: async (_args, bodyCtx) => {
+          bodyCtx.onFileRead?.("a.txt", path.join(r, "a.txt"), "spoofed-body-id");
+          return "read";
+        },
+        write_file: async (_args, bodyCtx) => {
+          bodyCtx.onFileDiff?.({
+            id: "ed-test", file: "a.txt", path: path.join(r, "a.txt"), kind: "create",
+            diff: "+a", added: 1, removed: 0, original: "", applied: "a",
+          }, "spoofed-body-id");
+          return "write";
+        },
+      },
+    });
+    await runtime.execute("read_file", { path: "a.txt" }, { callId: "call-read" });
+    await runtime.execute("write_file", { path: "a.txt", content: "a" }, { callId: "call-write" });
+    assert.deepEqual(seen, [
+      { kind: "read", callId: "call-read" },
+      { kind: "diff", callId: "call-write" },
+    ]);
+  } finally { fs.rmSync(r, { recursive: true, force: true }); }
 });
 
 test("ToolRegistry 拒绝重复名称，Provider schema 与执行器不能漂移", () => {
@@ -351,4 +385,55 @@ test("未注册工具即使有保守 spec 也不能碰 raw body", async () => {
     assert.equal(out.blocked, "capability");
     assert.match(out.result, /未注册工具/);
   } finally { fs.rmSync(r, { recursive: true, force: true }); }
+});
+
+
+test("H2 Extension policy/hook runs inside ToolRuntime without bypassing built-in admission", async () => {
+  const r = root();
+  const extensions = new ExtensionRuntime();
+  await extensions.apply({
+    manifest: {
+      schemaVersion: 1,
+      id: "runtime.guard",
+      version: "1.0.0",
+      trust: "trusted",
+      capabilities: { hooks: true },
+    },
+    activate(ext) {
+      ext.registerPolicy({
+        name: "guard",
+        evaluate: (_tool, input) => input?.block ? { blocked: "blocked-by-extension" } : { warnings: ["policy-warning"] },
+      });
+      ext.registerHook({
+        name: "before",
+        event: "pre-tool",
+        run: () => ({ warnings: ["pre-warning"] }),
+      });
+      ext.registerHook({
+        name: "after",
+        event: "post-tool",
+        run: () => ({ note: "post-note" }),
+      });
+    },
+  });
+  const lease = extensions.acquireLease();
+  try {
+    const runtime = makeRuntime(r, {
+      context: { extensionLease: lease },
+      executors: { read_file: async () => "body-ok" },
+    });
+    const blocked = await runtime.execute("read_file", { path: "x", block: true });
+    assert.equal(blocked.blocked, "policy");
+    assert.match(blocked.result, /blocked-by-extension/);
+
+    const ok = await runtime.execute("read_file", { path: "x" });
+    assert.match(ok.result, /policy-warning/);
+    assert.match(ok.result, /pre-warning/);
+    assert.match(ok.result, /body-ok/);
+    assert.match(ok.result, /post-note/);
+  } finally {
+    await lease.release();
+    await extensions.dispose();
+    fs.rmSync(r, { recursive: true, force: true });
+  }
 });

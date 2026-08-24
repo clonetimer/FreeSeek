@@ -1,5 +1,6 @@
 // check:max-lines 2800 (已拆 freeserver/storage/webview-html/prompts/activate/agent-utils/rolePresets；v0.17.11 权限收敛+侧边栏入口+manageHookifyRules+manageKits 增行；待拆 providerUI / handleUser 后继续减小)
 import * as vscode from "vscode";
+import type { ExtensionRuntime } from "./kernel/extensions/runtime";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
@@ -7,6 +8,7 @@ import { ChatMessage, reflectConversation } from "./provider";
 import { runAgent, AgentCallbacks, clearSubAgentRegistry } from "./agent";
 import { trimUnfinishedTurn } from "./agent-utils";
 import { listRolePresets } from "./rolePresets";
+import { listInstalledThemes } from "./plugin";
 import {
   SYSTEM_PROMPT,
   SYSTEM_PROMPT_PROTECTION,
@@ -126,7 +128,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   /** 会话历史持久化（路径/索引/队列写/迁移），从本类拆分出的独立能力模块。 */
   private storage: SessionStorage;
 
-  constructor(private readonly context: vscode.ExtensionContext) {
+  constructor(private readonly context: vscode.ExtensionContext, private readonly extensionRuntime?: ExtensionRuntime) {
     this.storage = new SessionStorage(context);
     // 启动时恢复上次活动的会话（落盘历史），使整窗重载后对话不丢失
     const idx = this.storage.loadIndex();
@@ -202,6 +204,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                   status: s.status,
                   builtin: !!s.builtin,
                 })),
+              pluginThemes: listInstalledThemes(this.workspaceRoot()),
             });
           }
           view.webview.postMessage({ type: "mcp_status", text: mcpManager.statusSummary() });
@@ -640,7 +643,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             if (key === "contextPlanner" && !["off", "v1", "v1.1", "v1.2"].includes(String(v))) v = "off";
             if (key === "theme") {
               const t = String(v || "default");
-              if (!["default", "genshin", "wuthering", "academic", "industrial"].includes(t)) break;
+              const builtin = ["default", "genshin", "wuthering", "academic", "industrial"];
+              const pluginOk = listInstalledThemes(this.workspaceRoot()).some((p) => p.name === t);
+              if (!builtin.includes(t) && !pluginOk) break;
               v = t;
               await cfg.update(key, t, vscode.ConfigurationTarget.Global);
               view.webview.postMessage({ type: "theme", theme: t });
@@ -1337,6 +1342,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           signal: runAbort.signal,
           eventLog: runEventLog,
           eventActor: "main",
+          extensionRuntime: this.extensionRuntime,
           // 文件修改痕迹（diff）：write_file/edit_file 执行后向 webview 推送 unified diff，
           // 供前端渲染「修改痕迹」卡片（红绿对照 + +N -M 统计 + 接受/回滚），不直接进模型上下文。
           onFileDiff: (info) => {

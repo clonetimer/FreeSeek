@@ -48,13 +48,21 @@ test("Remote Sandbox token 对非本机明文 HTTP fail-closed", () => {
   );
 });
 
-test("Remote workspace mapper 对存在的 symlink cwd 做 realpath containment", () => {
+test("Remote workspace mapper 对存在的 symlink cwd 做 realpath containment", (t) => {
   const fs = require("node:fs") as typeof import("node:fs");
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "remote-map-root-"));
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), "remote-map-outside-"));
   try {
     const link = path.join(root, "escape");
-    fs.symlinkSync(outside, link, "dir");
+    try {
+      fs.symlinkSync(outside, link, process.platform === "win32" ? "junction" : "dir");
+    } catch (err: any) {
+      if (["EPERM", "EACCES", "ENOTSUP"].includes(String(err?.code ?? ""))) {
+        t.skip("当前环境不允许创建目录 symlink；有 symlink 权限的平台仍执行 realpath containment 验证");
+        return;
+      }
+      throw err;
+    }
     const mapper = createStaticRemoteWorkspaceMapper(root, "ws");
     assert.throws(() => mapper(link), /cwd 越界/);
   } finally {

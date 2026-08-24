@@ -15,6 +15,7 @@ import { truncateToolResult, withAbortableTimeout } from "./agent-utils";
 import type { ToolRuntimeSpec } from "./tool-runtime-spec";
 import { ToolRegistry } from "./tool-registry";
 import { captureWorkspaceCheckpoint } from "./workspace-timeline";
+import { resolveSafeInRoots } from "./path-safety";
 
 export type ToolApprovalResult = {
   allow: boolean;
@@ -23,7 +24,7 @@ export type ToolApprovalResult = {
 };
 
 export interface ToolRuntimeCallbacks {
-  requestApproval?: (toolName: string, input: any) => Promise<ToolApprovalResult>;
+  requestApproval?: (toolName: string, input: any, callId?: string) => Promise<ToolApprovalResult>;
   onTimeout?: (toolName: string, timeoutMs: number) => void;
   onStatus?: (text: string) => void;
 }
@@ -66,6 +67,20 @@ function genericApprovalRequired(spec: ToolRuntimeSpec, args: any, ctx: ToolCont
 }
 
 /** 一个 runAgent 对应一个实例：其中保存 MCP 会话级 approval cache。 */
+function operationWorkspaceRoot(ctx: ToolContext, toolName: string, args: any): string {
+  const raw = toolName === "run_command" || toolName === "run_code" || toolName === "run_python"
+    ? args?.cwd
+    : ["read_file", "write_file", "edit_file", "delete_file", "list_directory", "grep"].includes(toolName)
+      ? args?.path
+      : undefined;
+  if (typeof raw !== "string" || !raw.trim() || ctx.worktreeRoot) return ctx.worktreeRoot ?? ctx.workspaceRoot;
+  try {
+    return resolveSafeInRoots(ctx.workspaceRoot, ctx.additionalWorkspaceRoots, raw).root;
+  } catch {
+    return ctx.workspaceRoot;
+  }
+}
+
 export class ToolRuntime {
   private readonly mcpApproved = new Set<string>();
 
@@ -158,6 +173,25 @@ export class ToolRuntime {
       });
     }
 
+    // H2 Extension policies are monotonic: they may only block/warn and therefore cannot
+    // bypass built-in deny, generic approval, MCP approval or sandbox admission.
+    let extensionWarnings: string[] = [];
+    if (this.ctx.extensionLease) {
+      try {
+        const policy = await this.ctx.extensionLease.evaluatePolicies(name, args, this.ctx);
+        if (policy.blocked) {
+          return done({ result: `⛔ [extension policy] ${policy.blocked}`, spec, blocked: "policy" });
+        }
+        if (policy.warnings?.length) extensionWarnings.push(...policy.warnings);
+      } catch (error: any) {
+        return done({
+          result: `⛔ Extension policy 执行失败，已 fail-closed：${error?.message ?? String(error)}`,
+          spec,
+          blocked: "policy",
+        });
+      }
+    }
+
     if (perm.decision !== "allow" && genericApprovalRequired(spec, args, this.ctx)) {
       if (!this.callbacks.requestApproval) {
         return done({
@@ -169,7 +203,7 @@ export class ToolRuntime {
       emit("approval/request", { callId: options.callId, name, category: "tool", args });
       let decision: ToolApprovalResult;
       try {
-        decision = await this.callbacks.requestApproval(name, args);
+        decision = await this.callbacks.requestApproval(name, args, options.callId);
         emit("approval/result", {
           callId: options.callId, name, category: "tool", allow: decision.allow, persist: decision.persist, reason: decision.reason,
         });
@@ -202,7 +236,7 @@ export class ToolRuntime {
       emit("approval/request", { callId: options.callId, name, category: "mcp", args });
       let decision: "allow" | "once" | "";
       try {
-        decision = await this.ctx.requestMCPApproval(name, safeJson(args));
+        decision = await this.ctx.requestMCPApproval(name, safeJson(args), options.callId);
         emit("approval/result", {
           callId: options.callId, name, category: "mcp", allow: decision === "allow" || decision === "once", persist: decision === "allow" ? "allow" : undefined,
         });
@@ -225,25 +259,58 @@ export class ToolRuntime {
     }
 
     const sandboxPlan = commandExecPlan(execPolicyFromContext(this.ctx)).plan;
+    const opRoot = operationWorkspaceRoot(this.ctx, name, args);
     const pre = await runPreToolHooks(
       name,
       args,
       sandboxPlan.osSandboxed,
-      this.ctx.workspaceRoot,
+      opRoot,
       perm.decision === "allow",
       this.ctx.allowCommandHooks ?? false
     );
     if (!pre.ok) {
       return done({ result: pre.message ?? "操作被拦截。", spec, blocked: "hook" });
     }
+    if (pre.warnings?.length) extensionWarnings.push(...pre.warnings);
+    if (this.ctx.extensionLease) {
+      try {
+        const hook = await this.ctx.extensionLease.runHooks("pre-tool", { toolName: name, args, ctx: this.ctx });
+        if (hook.blocked) return done({ result: `⛔ [extension hook] ${hook.blocked}`, spec, blocked: "hook" });
+        if (hook.warnings?.length) extensionWarnings.push(...hook.warnings);
+      } catch (error: any) {
+        return done({
+          result: `⛔ Extension pre-tool hook 执行失败，已 fail-closed：${error?.message ?? String(error)}`,
+          spec,
+          blocked: "hook",
+        });
+      }
+    }
 
-    const warningPrefix = pre.warnings?.length
-      ? `[安全提示] ${pre.warnings.join(" ")}\n`
+    const warningPrefix = extensionWarnings.length
+      ? `[安全提示] ${extensionWarnings.join(" ")}\n`
       : "";
+    // File evidence is emitted by tool bodies only after a real read/mutation succeeds.
+    // Thread the provider tool-call id through those callbacks here instead of asking
+    // hosts to infer correlation from execution order (parallel read tools are allowed).
+    const bodyContext: ToolContext = {
+      ...this.ctx,
+      ...(this.ctx.onFileDiff
+        ? {
+            onFileDiff: (info) =>
+              this.ctx.onFileDiff?.(info, options.callId),
+          }
+        : {}),
+      ...(this.ctx.onFileRead
+        ? {
+            onFileRead: (file, filePath) =>
+              this.ctx.onFileRead?.(file, filePath, options.callId),
+          }
+        : {}),
+    };
     // 所有 body（包括 Agent-native override）都走同一个取消/错误归一化包装；
     // timeoutMs 未声明时仅提供 parent AbortSignal 与异常归一化，不额外设置 deadline。
     const guard = await withAbortableTimeout(
-      (childSignal) => this.registry.executeBody(name, args, { ...this.ctx, signal: childSignal }),
+      (childSignal) => this.registry.executeBody(name, args, { ...bodyContext, signal: childSignal }),
       spec.timeoutMs,
       signal
     );
@@ -265,15 +332,26 @@ export class ToolRuntime {
     }
     let result = String(guard.value ?? "");
 
-    const post = await postToolUse(name, args, this.ctx.workspaceRoot, this.ctx.runtime?.autoFormat !== false);
+    const post = await postToolUse(name, args, opRoot, this.ctx.runtime?.autoFormat !== false);
     if (post) result += post;
+    if (this.ctx.extensionLease) {
+      try {
+        const hook = await this.ctx.extensionLease.runHooks("post-tool", { toolName: name, args, result, ctx: this.ctx });
+        const postNotes = [...(hook.warnings ?? []), ...(hook.note ? [hook.note] : [])];
+        if (postNotes.length) result += `\n[extension hook] ${postNotes.join(" ")}`;
+      } catch (error: any) {
+        // The tool body already completed. A post hook cannot retroactively turn a successful
+        // side effect into a failure, so surface the hook error as an appended diagnostic.
+        result += `\n[extension hook warning] ${error?.message ?? String(error)}`;
+      }
+    }
 
     // 对可能改变工作区的能力在“工具 + formatter 已结束”后记录 post-state checkpoint。
     // pre-edit checkpoint 负责撤销当前危险操作；post-state checkpoint 负责精确 replay/fork。
     if (name !== "checkpoint" && ["write", "execute", "destructive"].includes(spec.effect)) {
       try {
         captureWorkspaceCheckpoint(
-          this.ctx,
+          { ...this.ctx, workspaceRoot: opRoot },
           `freesek-post:${name}:${Date.now().toString(36)}`,
           "auto",
           true

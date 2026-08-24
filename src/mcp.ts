@@ -6,11 +6,8 @@
  *  - 通过 freesek.mcpServers 配置连接外部 MCP server（stdio 或 http/streamable）。
  *  - 启动期 list_tools 发现工具，以动态 ToolDefinition 注入 L4 工具注册表，
  *    工具名统一加前缀 `mcp__<server>__<tool>`（避免与内置工具冲突，亦便于路由）。
- *  - agent.ts 在工具执行循环里识别 `mcp__` 前缀，把调用经 MCP 客户端转发给外部 server。
- *  - 所有连接/调用均为 best-effort：server 未安装/启动失败，仅缺该 server 的工具，
- *    不影响内置工具与其它 server。
- *
- * 这是 v0.6.0 对文档 v2.2「Plugins（MCP 接入）仍待做」的落地。
+ *  - 动态 `mcp__` 工具通过统一 ToolRegistry/ToolRuntime 路由到外部 server。
+ *  - 连接/调用 best-effort：单个 server 失败不影响内置工具或其它 server。
  */
 
 import { spawn, ChildProcessWithoutNullStreams } from "child_process";
@@ -105,11 +102,8 @@ class McpConnection {
       }
       this.child.on("error", (e) => reject(e));
       this.child.stdout?.on("data", (d: Buffer) => this.onChunk(d.toString()));
-      // stderr 透传到扩展输出，便于排查 server 自身问题
-      this.child.stderr?.on("data", (_d: Buffer) => {
-        // 静默：避免噪音；如需调试可取消注释 console.error
-        // console.error(`[mcp:${this.name}]`, d.toString());
-      });
+      // 子进程 stderr 暂不进入 RPC stdout；宿主级连接诊断由 McpManager log sink 负责。
+      this.child.stderr?.on("data", (_d: Buffer) => undefined);
       this.child.on("exit", (code) => {
         const wasInitialized = this.initialized;
         const err = new Error(`MCP server "${this.name}" 已退出（code=${code ?? "?"}）`);
@@ -384,11 +378,22 @@ class McpConnection {
   }
 }
 
-/** MCP 管理器（单例）：维护所有 server 连接与聚合工具表。 */
+/** MCP 日志出口。ACP stdio host 会把诊断信息送到 stderr，避免污染协议 stdout。 */
+export interface McpLogSink {
+  info?(message: string): void;
+  warn?(message: string): void;
+}
+
+/** MCP 管理器：维护一组 server 连接与聚合工具表。宿主可按 session 创建独立实例。 */
 export class McpManager {
   private conns = new Map<string, McpConnection>();
   private connecting: Promise<void> | null = null;
   private connected = false;
+
+  constructor(private readonly log: McpLogSink = {
+    info: (message) => console.log(message),
+    warn: (message) => console.warn(message),
+  }) {}
 
   /** 按配置连接所有 server（best-effort，单次去重）。 */
   async connectAll(servers: McpServerConfig[]): Promise<void> {
@@ -400,9 +405,9 @@ export class McpManager {
         try {
           await conn.connect();
           this.conns.set(s.name, conn);
-          console.log(`[FreeSeek MCP] 已连接 server: ${s.name}（${conn.tools.length} 个工具）`);
+          this.log.info?.(`[FreeSeek MCP] 已连接 server: ${s.name}（${conn.tools.length} 个工具）`);
         } catch (e: any) {
-          console.warn(`[FreeSeek MCP] server "${s.name}" 连接失败：${e?.message ?? e}`);
+          this.log.warn?.(`[FreeSeek MCP] server "${s.name}" 连接失败：${e?.message ?? e}`);
         }
       }
       this.connected = true;
@@ -552,7 +557,6 @@ export class McpManager {
     }
     return lines.length ? `MCP prompts：\n${lines.join("\n")}` : "";
   }
-
   /** 读取 resource（路由到第一个包含该 uri 的连接）。 */
   async callResource(uri: string, signal?: AbortSignal): Promise<string> {
     for (const conn of this.conns.values()) {
@@ -562,7 +566,6 @@ export class McpManager {
     }
     return `未找到 uri 为 "${uri}" 的 MCP resource。可用资源见系统提示词。`;
   }
-
   /** 获取 prompt（路由到第一个包含该名字的连接）。 */
   async callPrompt(name: string, args: Record<string, string> = {}, signal?: AbortSignal): Promise<string> {
     for (const conn of this.conns.values()) {
@@ -610,7 +613,6 @@ export class McpManager {
       return `⚠️ MCP 知识库检索失败：${e?.message ?? String(e)}`;
     }
   }
-
   /** 返回已连接 server 的摘要（供前端展示）。 */
   statusSummary(): string {
     const lines = [...this.conns.values()].map(
@@ -643,13 +645,11 @@ export class McpManager {
     }
     return out;
   }
-
   /** 重新加载 MCP 连接：断开所有后按新配置重连（用于管理面板「重连」）。 */
   async reconnect(servers: McpServerConfig[]): Promise<void> {
     this.dispose();
     await this.connectAll(servers || []);
   }
-
   /** 断开并清空所有连接（释放子进程）。 */
   dispose(): void {
     for (const conn of this.conns.values()) conn.dispose();
@@ -657,10 +657,9 @@ export class McpManager {
     this.connected = false;
     this.connecting = null;
   }
-
   /** 调用 MCP 工具（best-effort，失败返回友好文本）。 */
   async callTool(name: string, args: any, signal?: AbortSignal): Promise<string> {
-    const server = name.slice(6).split("__")[0];
+    const server = name.slice("mcp__".length).split("__")[0];
     const conn = this.conns.get(server);
     if (!conn || !conn.ready) return `⚠️ MCP server "${server}" 未连接，无法调用 ${name}。`;
     try {

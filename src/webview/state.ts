@@ -29,12 +29,44 @@ export function setPost(fn: (msg: unknown) => void): void {
 export const THEMES = ["default", "genshin", "wuthering", "academic", "industrial"] as const;
 export type ThemeId = (typeof THEMES)[number];
 
+/** 插件皮肤（freeseek plugin add 安装，后端 settings 下发）。 */
+export interface PluginThemeInfo {
+  name: string;
+  label: string;
+  css: string;
+}
+
+const pluginThemes: PluginThemeInfo[] = [];
+
+/** 注册插件皮肤：注入 <style id="plugin-theme-<name>"> 并进入可切换集合。 */
+export function registerPluginThemes(list: PluginThemeInfo[]): void {
+  pluginThemes.length = 0;
+  for (const item of list) {
+    if (!item || !item.name || typeof item.css !== "string") continue;
+    let style = document.getElementById(`plugin-theme-${item.name}`) as HTMLStyleElement | null;
+    if (!style) {
+      style = document.createElement("style");
+      style.id = `plugin-theme-${item.name}`;
+      document.head.appendChild(style);
+    }
+    style.textContent = item.css;
+    pluginThemes.push(item);
+  }
+}
+
+/** 当前已注册的插件皮肤（设置面板渲染用）。 */
+export function getPluginThemes(): PluginThemeInfo[] {
+  return [...pluginThemes];
+}
+
 /**
- * 应用面板主题：切换 <body data-theme="...">，由 html.ts 中的 CSS 变量覆盖生效。
+ * 应用面板主题：切换 <body data-theme="...">，由 html.ts 与插件注入的 CSS 生效。
  * 默认主题不设 data-theme，完全跟随 VS Code 编辑器主题。
+ * 内置主题与插件皮肤等价放行，未知主题回落默认。
  */
 export function applyTheme(name: string): void {
-  const t = (THEMES as readonly string[]).includes(name) ? name : "default";
+  const t =
+    (THEMES as readonly string[]).includes(name) || pluginThemes.some((p) => p.name === name) ? name : "default";
   if (t === "default") delete document.body.dataset.theme;
   else document.body.dataset.theme = t;
 }

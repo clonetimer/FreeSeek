@@ -1,7 +1,7 @@
 // check:max-lines 250 (run_python / run_code 代码执行器；tools.ts 拆分；v0.17.9 收敛 TOOL_OUTPUT_PREVIEW_CAP 引用 +1)
 import * as fs from "fs";
 import * as path from "path";
-import { resolveSafe } from "./fs_utils";
+import { resolveSafe, resolveSafeInRoots } from "./fs_utils";
 import { truncatePreview } from "../agent-utils";
 import { execPolicyFromContext, commandExecPlan } from "../sandbox";
 import { getCommandRunner } from "../seam";
@@ -20,7 +20,7 @@ export async function runPython(ctx: ToolContext, args: any): Promise<string> {
   if (!code.trim()) return "⚠️ run_python 需要 code。";
   const timeoutSec = Math.min(Math.max(Number(args.timeout) || 120, 1), 600);
   const cwd = args.cwd
-    ? resolveSafe(ctx.workspaceRoot, String(args.cwd))
+    ? resolveSafeInRoots(ctx.workspaceRoot, ctx.additionalWorkspaceRoots, String(args.cwd)).path
     : ctx.workspaceRoot;
   const tmpDir = path.join(ctx.workspaceRoot, ".agent", "tmp");
   fs.mkdirSync(tmpDir, { recursive: true });
@@ -103,7 +103,11 @@ export async function runCode(ctx: ToolContext, args: any): Promise<string> {
   const language = String(args.language ?? "python").toLowerCase();
   const timeoutSec = Math.min(Math.max(Number(args.timeout) || 60, 1), 300);
   const base = ctx.worktreeRoot ?? ctx.workspaceRoot;
-  const cwd = args.cwd ? resolveSafe(base, String(args.cwd)) : base;
+  const cwd = args.cwd
+    ? (ctx.worktreeRoot
+      ? resolveSafe(base, String(args.cwd))
+      : resolveSafeInRoots(ctx.workspaceRoot, ctx.additionalWorkspaceRoots, String(args.cwd)).path)
+    : base;
 
   // bash / sh / shell → 复用 run_command 沙箱通道
   if (language === "bash" || language === "sh" || language === "shell") {

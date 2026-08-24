@@ -4,6 +4,16 @@
     "noEmit": true,
     "strict": true
   },
-  "include": ["src", "tests"],
-  "exclude": ["node_modules", "dist", "webview-out", "deepseek-free-api", "out"]
+  "include": [
+    "src",
+    "tests",
+    "apps/desktop/src"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "webview-out",
+    "deepseek-free-api",
+    "out"
+  ]
 }

@@ -24,6 +24,7 @@ test("统一 CLI help/version 不依赖 VS Code host", async () => {
   assert.equal(await runFreeSeekCli(["help"], help.io), 0);
   assert.match(help.stdout(), /freeseek run/);
   assert.match(help.stdout(), /freeseek sessions/);
+  assert.match(help.stdout(), /freeseek acp/);
 
   const version = capture();
   assert.equal(await runFreeSeekCli(["version"], version.io), 0);

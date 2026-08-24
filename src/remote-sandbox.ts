@@ -7,6 +7,7 @@
  */
 import * as fs from "fs";
 import * as path from "path";
+import { execFile } from "child_process";
 import type { CommandRunner } from "./seam";
 
 export interface RemoteWorkspaceTarget {
@@ -138,6 +139,192 @@ export function createHttpRemoteSandboxTransport(options: HttpRemoteSandboxTrans
         const parsed = JSON.parse(text) as RemoteSandboxResponse;
         if (parsed.exitCode !== null && !Number.isInteger(parsed.exitCode)) throw new Error("remote sandbox 响应缺少合法 exitCode");
         return parsed;
+      } finally {
+        clearTimeout(timer);
+        parentSignal?.removeEventListener("abort", onAbort);
+      }
+    },
+  };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 缺口3：远程 / 云沙箱 provider 实装
+// ──────────────────────────────────────────────────────────────────────────────
+// 0.24 仅定义了 RemoteSandboxTransport 接口与 HTTP 传输；本版本补齐三种可直接
+// 落地运行的 provider，对标 dsh 的 e2b/landlock 实装：
+//   - createLocalDockerRemoteSandboxTransport：docker exec 进一个已起容器的隔离环境
+//   - createSshRemoteSandboxTransport：经 SSH 在远端主机执行（复用 ssh/ControlMaster）
+//   - createE2BRemoteSandboxTransport：E2B 沙箱 API（POST /sandboxes/:id/commands）
+// 三者都满足 RemoteSandboxTransport 契约，经 createRemoteCommandRunner 注入
+// CommandRunner seam（seam.setCommandRunner），无需改动工具执行链路。
+// ════════════════════════════════════════════════════════════════════════════
+
+/** 本地 Docker 容器执行：把命令通过 `docker exec` 送进一个常驻容器（隔离、可配只读挂载）。 */
+export interface LocalDockerRemoteSandboxOptions {
+  container: string;
+  /** docker 可执行文件（默认 "docker"）。 */
+  docker?: string;
+  /** 命令失败/超时的整进程硬超时（默认 5 分钟）。 */
+  requestTimeoutMs?: number;
+}
+
+export function createLocalDockerRemoteSandboxTransport(
+  options: LocalDockerRemoteSandboxOptions
+): RemoteSandboxTransport {
+  const docker = options.docker ?? "docker";
+  const timeoutMs = options.requestTimeoutMs ?? 5 * 60 * 1000;
+  return {
+    async execute(req, parentSignal) {
+      const args = ["exec", "-i"];
+      if (req.networkMode === "off" || req.networkMode === "localhost") {
+        args.push("--network", "none");
+      }
+      if (req.label) args.push("--workdir", req.cwd);
+      args.push(options.container, "sh", "-c", req.command);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(new Error("DOCKER_SANDBOX_TIMEOUT")), timeoutMs);
+      const onAbort = () => controller.abort(parentSignal?.reason ?? new Error("DOCKER_SANDBOX_CANCEL"));
+      if (parentSignal?.aborted) onAbort();
+      else parentSignal?.addEventListener("abort", onAbort, { once: true });
+      try {
+        const proc = execFile(docker, args, {
+          timeout: req.timeoutMs,
+          maxBuffer: 20 * 1024 * 1024,
+          windowsHide: true,
+          signal: controller.signal,
+          ...(req.input ? { input: req.input } : {}),
+        });
+        const stdout = await proc;
+        return { exitCode: 0, stdout: stdout.toString(), sandbox: `docker:${options.container}` };
+      } catch (e: any) {
+        if (e?.killed || e?.name === "AbortError") {
+          return { exitCode: null, timedOut: true, cancelled: e?.name === "AbortError", sandbox: `docker:${options.container}` };
+        }
+        return {
+          exitCode: e?.code ?? 1,
+          stdout: e?.stdout ? String(e.stdout) : undefined,
+          stderr: e?.stderr ? String(e.stderr) : e?.message,
+          sandbox: `docker:${options.container}`,
+        };
+      } finally {
+        clearTimeout(timer);
+        parentSignal?.removeEventListener("abort", onAbort);
+      }
+    },
+  };
+}
+
+/** SSH 远端执行：依赖本机 ssh + 可选 ControlMaster 复用连接。 */
+export interface SshRemoteSandboxOptions {
+  /** user@host 或 host（~/.ssh/config 别名）。 */
+  host: string;
+  /** ssh 可执行文件（默认 "ssh"）。 */
+  ssh?: string;
+  /** 额外 ssh 参数（如 -p 2222、-i key.pem、-o ControlMaster=auto 等）。 */
+  sshArgs?: string[];
+  requestTimeoutMs?: number;
+}
+
+export function createSshRemoteSandboxTransport(options: SshRemoteSandboxOptions): RemoteSandboxTransport {
+  const ssh = options.ssh ?? "ssh";
+  const timeoutMs = options.requestTimeoutMs ?? 5 * 60 * 1000;
+  return {
+    async execute(req, parentSignal) {
+      const controlled = req.networkMode === "off" ? [] : []; // SSH 层不额外封网，由远端 shell 策略负责
+      const remoteCmd = `cd ${JSON.stringify(req.cwd)} 2>/dev/null || true; ${req.command}`;
+      const args = [
+        ...(options.sshArgs ?? []),
+        options.host,
+        ...controlled,
+        "sh",
+        "-c",
+        remoteCmd,
+      ];
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(new Error("SSH_SANDBOX_TIMEOUT")), timeoutMs);
+      const onAbort = () => controller.abort(parentSignal?.reason ?? new Error("SSH_SANDBOX_CANCEL"));
+      if (parentSignal?.aborted) onAbort();
+      else parentSignal?.addEventListener("abort", onAbort, { once: true });
+      try {
+        const proc = execFile(ssh, args, {
+          timeout: req.timeoutMs,
+          maxBuffer: 20 * 1024 * 1024,
+          windowsHide: true,
+          signal: controller.signal,
+          ...(req.input ? { input: req.input } : {}),
+        });
+        const stdout = await proc;
+        return { exitCode: 0, stdout: stdout.toString(), sandbox: `ssh:${options.host}` };
+      } catch (e: any) {
+        if (e?.killed || e?.name === "AbortError") {
+          return { exitCode: null, timedOut: true, cancelled: e?.name === "AbortError", sandbox: `ssh:${options.host}` };
+        }
+        return {
+          exitCode: e?.code ?? 1,
+          stdout: e?.stdout ? String(e.stdout) : undefined,
+          stderr: e?.stderr ? String(e.stderr) : e?.message,
+          sandbox: `ssh:${options.host}`,
+        };
+      } finally {
+        clearTimeout(timer);
+        parentSignal?.removeEventListener("abort", onAbort);
+      }
+    },
+  };
+}
+
+/** E2B 云沙箱执行：调用 E2B 沙箱命令 API。 */
+export interface E2BRemoteSandboxOptions {
+  sandboxId: string;
+  apiKey: string;
+  /** E2B API 基址（默认 https://api.e2b.dev）。 */
+  baseUrl?: string;
+  requestTimeoutMs?: number;
+}
+
+export function createE2BRemoteSandboxTransport(options: E2BRemoteSandboxOptions): RemoteSandboxTransport {
+  const base = (options.baseUrl ?? "https://api.e2b.dev").replace(/\/$/, "");
+  const url = `${base}/sandboxes/${encodeURIComponent(options.sandboxId)}/commands`;
+  const timeoutMs = options.requestTimeoutMs ?? 5 * 60 * 1000;
+  return {
+    async execute(req, parentSignal) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(new Error("E2B_SANDBOX_TIMEOUT")), timeoutMs);
+      const onAbort = () => controller.abort(parentSignal?.reason ?? new Error("E2B_SANDBOX_CANCEL"));
+      if (parentSignal?.aborted) onAbort();
+      else parentSignal?.addEventListener("abort", onAbort, { once: true });
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "authorization": `Bearer ${options.apiKey}`,
+          },
+          body: JSON.stringify({
+            command: req.command,
+            cwd: req.cwd,
+            timeoutMs: req.timeoutMs,
+            ...(req.argv?.length ? { argv: req.argv } : {}),
+            ...(req.input ? { input: req.input } : {}),
+          }),
+          signal: controller.signal,
+        });
+        const text = await res.text();
+        if (!res.ok) throw new Error(`E2B HTTP ${res.status}: ${text.slice(0, 500)}`);
+        const parsed = JSON.parse(text) as {
+          exitCode?: number; stdout?: string; stderr?: string; error?: string;
+        };
+        return {
+          exitCode: parsed.exitCode ?? (parsed.error ? 1 : 0),
+          stdout: parsed.stdout,
+          stderr: parsed.stderr ?? parsed.error,
+          sandbox: `e2b:${options.sandboxId}`,
+        };
+      } catch (e: any) {
+        if (e?.name === "AbortError") {
+          return { exitCode: null, cancelled: true, sandbox: `e2b:${options.sandboxId}` };
+        }
+        return { exitCode: 1, stderr: e?.message, sandbox: `e2b:${options.sandboxId}` };
       } finally {
         clearTimeout(timer);
         parentSignal?.removeEventListener("abort", onAbort);

@@ -1,26 +1,30 @@
-# 依赖与构建产物
 node_modules/
 dist/
-
-# 发布产物（vsix 归拢到 releases/ 后统一跟踪）
-*.vsix
-releases/
-
-# 测试产物（test.mjs 每次重建）
 tests/.build/
+webview-out/
+out/
+releases/
+_verify_*/
+_tmp_*/
 
-# 免费服务缓存
-.npmcache/
+# test.mjs esbuild 路径预置的 CLI 入口 bundle（运行时生成）
+tests/src/
 
-# 日志
+# VSIX release packages
+*.vsix
+
+# Logs
 *.log
+npm-debug.log*
 
-# 临时验证脚本（规范：用后即删，兜底忽略）
-_debug_*
-_tmp_*
-_verify_*
-_probe*
+# Environment / secrets
+.env
+.env.*
 
-# Private benchmark/holdout packs must never enter public source control.
-.freesek-holdout/
-benchmarks/private/
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+

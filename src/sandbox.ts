@@ -1,3 +1,4 @@
+// check:max-lines 720
 /**
  * 受限命令执行器（Layer 4 安全边界 / 对标 Claude Code Seatbelt & Codex OS 沙箱）。
  *
@@ -490,4 +491,196 @@ export async function runCommand(opts: RunCommandOpts): Promise<string> {
   }
   const env = opts.restricted ? buildRestrictedEnv(opts.envWhitelist) : process.env;
   return execCapture(bin, args, opts, env);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 缺口2：声明式命令策略语言（Declarative ExecPolicy DSL）
+// ──────────────────────────────────────────────────────────────────────────────
+// 对标 codex 的 execpolicy：用「声明式规则集」替代散落的正则 allow/deny 数组，
+// 支持按 cmd 字面量 / 正则 / effect 类别 / OS / 网络意图组合判定，并能表达
+// allow / deny / ask(交互审批) / sandbox(强制 OS 沙箱) / readonly(禁执行) 五档结果。
+//
+// 这是一层「纯函数、可审计、可单测」的策略评估器：不依赖 vscode，也不碰具体
+// 命令执行链路，编译后返回一个 (ctx) => PolicyDecision 的判定函数，由 ToolRuntime
+// / RunCommand 在 preToolUse 阶段调用。
+// ════════════════════════════════════════════════════════════════════════════
+
+/** 策略判定结果档位。 */
+export type PolicyTier = "allow" | "deny" | "ask" | "sandbox" | "readonly";
+
+/** 命令 effect 类别（与危险/网络判定解耦，供规则匹配）。 */
+export type PolicyEffect = "read" | "write" | "net" | "destructive" | "neutral";
+
+/** 规则匹配的 when 子句（所有给定字段都必须命中；省略的字段表示不约束该维度）。 */
+export interface PolicyWhen {
+  /** 命令字面量精确匹配（如 "git status"）。 */
+  cmd?: string;
+  /** 命令正则（字符串形式，运行时编译为 RegExp）。匹配整条待执行命令串。 */
+  regex?: string;
+  /** effect 类别命中其一即匹配（如 ["destructive"]）。 */
+  effect?: PolicyEffect[];
+  /** OS 平台命中其一即匹配（process.platform 取值：win32/darwin/linux）。 */
+  os?: NodeJS.Platform[];
+  /** 网络意图命中其一即匹配。 */
+  network?: SandboxNetworkMode[];
+}
+
+/** 单条策略规则（对标 codex execpolicy 的 rule 项）。 */
+export interface PolicyRule {
+  /** 匹配条件；为空 {} 表示命中一切（常作兜底规则）。 */
+  when: PolicyWhen;
+  /** 命中后的处理档位。 */
+  tier: PolicyTier;
+  /** 可读原因（出现在拦截/审批提示里，便于审计与解释）。 */
+  reason?: string;
+}
+
+/** 声明式策略文档（可由 freesek.execPolicyFile 指向的 JSON 提供）。 */
+export interface ExecPolicyDocument {
+  version: 1;
+  /** 默认档位（无规则命中时采用）。强烈建议显式声明，缺失时 fail-closed 为 "ask"。 */
+  default?: PolicyTier;
+  /** 规则按数组顺序求值：第一条全部命中的规则胜出（首规则优先）。 */
+  rules?: PolicyRule[];
+}
+
+/** 一次策略判定的输入上下文。 */
+export interface PolicyContext {
+  command: string;
+  /** 推断出的 effect 类别；调用方可用 detectCommandEffect 辅助生成。 */
+  effect: PolicyEffect;
+  network: SandboxNetworkMode;
+}
+
+/** 编译后的判定结果。 */
+export interface PolicyDecision {
+  tier: PolicyTier;
+  /** 命中规则的原因（无则回退到 default 原因）。 */
+  reason?: string;
+  /** 命中的规则下标（用于审计日志）；-1 表示 default。 */
+  ruleIndex: number;
+}
+
+function classifyEffectSimple(cmd: string): PolicyEffect {
+  const c = cmd.toLowerCase();
+  if (/(^|\s)(rm\s+-rf|rm\s+-r\s+-f|mkfs|dd\s+if=|format|shutdown|reboot|git\s+push\s+(--force|-f))(\s|$)/.test(c)) {
+    return "destructive";
+  }
+  if (/(^|\s)(curl|wget|ssh|scp|rsync|git\s+(clone|fetch|pull|push)|npm\s+(i|install|publish)|pip\s+install|pnpm|yarn|telnet|nc\b|ncat)(\s|$)/.test(c)) {
+    return "net";
+  }
+  if (/(^|\s)(write|edit|touch|mkdir|cp|mv|git\s+(commit|add|checkout|branch|merge|rebase))(\s|$)/.test(c)) {
+    return "write";
+  }
+  if (/(^|\s)(cat|head|tail|less|more|grep|rg|fd|ls|read|git\s+(status|log|diff|show|branch))(\s|$)/.test(c)) {
+    return "read";
+  }
+  return "neutral";
+}
+
+/** 辅助：从命令串推断 effect 类别（供调用方在构建 PolicyContext 时使用）。 */
+export function detectCommandEffect(command: string): PolicyEffect {
+  return classifyEffectSimple(command);
+}
+
+function whenMatches(when: PolicyWhen, ctx: PolicyContext): boolean {
+  if (when.cmd !== undefined && ctx.command.trim() !== when.cmd.trim()) return false;
+  if (when.regex !== undefined) {
+    try {
+      if (!new RegExp(when.regex).test(ctx.command)) return false;
+    } catch {
+      // 非法正则视为不匹配（不阻断其他规则），但留痕由编译期校验负责。
+      return false;
+    }
+  }
+  if (when.effect?.length && !when.effect.includes(ctx.effect)) return false;
+  if (when.os?.length && !when.os.includes(process.platform)) return false;
+  if (when.network?.length && !when.network.includes(ctx.network)) return false;
+  return true;
+}
+
+/**
+ * 编译声明式策略文档为可执行的判定函数。
+ * - 编译期做基本校验（正则可编译、default 缺失警告），返回 fail-closed 判定器；
+ * - 运行期首规则优先：第一条 whenMatches 为真的规则胜出；无命中用 default。
+ */
+export function compileExecPolicy(doc: ExecPolicyDocument): (ctx: PolicyContext) => PolicyDecision {
+  const rules = doc.rules ?? [];
+  // 编译期预编译正则，避免运行期重复编译。
+  const compiled = rules.map((r, i) => {
+    let re: RegExp | undefined;
+    if (r.when.regex) {
+      try {
+        re = new RegExp(r.when.regex);
+      } catch (e) {
+        throw new Error(`ExecPolicy 规则 #${i} 正则非法：${r.when.regex} -> ${(e as Error).message}`);
+      }
+    }
+    return { rule: r, index: i, re };
+  });
+  const fallback: PolicyTier = doc.default ?? "ask";
+  return (ctx: PolicyContext): PolicyDecision => {
+    for (const { rule, index, re } of compiled) {
+      const w = rule.when;
+      if (w.cmd !== undefined && ctx.command.trim() !== w.cmd.trim()) continue;
+      if (re && !re.test(ctx.command)) continue;
+      if (w.effect?.length && !w.effect.includes(ctx.effect)) continue;
+      if (w.os?.length && !w.os.includes(process.platform)) continue;
+      if (w.network?.length && !w.network.includes(ctx.network)) continue;
+      return { tier: rule.tier, reason: rule.reason, ruleIndex: index };
+    }
+    return {
+      tier: fallback,
+      reason: doc.default ? undefined : "未命中任何规则，按 fail-closed 默认档 'ask' 处理",
+      ruleIndex: -1,
+    };
+  };
+}
+
+/** 把策略文档从磁盘加载（当前支持 JSON；YAML 由上层转换后传对象）。 */
+export function loadExecPolicyDocument(raw: unknown): ExecPolicyDocument {
+  if (!raw || typeof raw !== "object" || (raw as any).version !== 1) {
+    throw new Error("ExecPolicy 文档非法：需含 version:1");
+  }
+  const d = raw as ExecPolicyDocument;
+  if (d.rules) {
+    for (const r of d.rules) {
+      if (r.when.regex) new RegExp(r.when.regex); // 触发校验
+    }
+  }
+  return d;
+}
+
+/**
+ * 把声明式策略决策并入现有 ExecPolicy：当决策为 sandbox 档时强制 sandboxMode=sandbox，
+ * deny/readonly 时统一通过 blocked 表达，ask 留给 ToolRuntime 走交互审批。
+ * 返回「已修正」的 ExecPolicy 与可选硬拦截原因，供 RunCommand 在 preToolUse 阶段消费。
+ */
+export function applyPolicyDecision(
+  base: ExecPolicy,
+  decision: PolicyDecision
+): { policy: ExecPolicy; blocked?: string } {
+  switch (decision.tier) {
+    case "deny":
+      return {
+        policy: base,
+        blocked: `⛔ 执行策略拒绝该命令${decision.reason ? `（${decision.reason}）` : ""}。`,
+      };
+    case "readonly":
+      return {
+        policy: { ...base, sandboxMode: "readonly", allowShell: false },
+        blocked: `⛔ 执行策略将该命令限为 readonly（禁止执行）${decision.reason ? `（${decision.reason}）` : ""}。`,
+      };
+    case "sandbox":
+      return {
+        policy: { ...base, sandboxMode: "sandbox", allowShell: base.allowShell },
+        blocked: undefined,
+      };
+    case "allow":
+      // allow 档下即便 base 为 readonly 也放行（声明策略优先级高于静态档位）。
+      return { policy: { ...base, sandboxMode: "off", allowShell: true }, blocked: undefined };
+    case "ask":
+    default:
+      return { policy: base, blocked: undefined };
+  }
 }

@@ -16,7 +16,13 @@ function git(root: string, args: string[]): string {
 test("shadow checkpoint 不改变用户工作树/index/stash，rewind 也不删除用户 stash", (t) => {
   const root = tmp("freeseek-cp-work-");
   const store = tmp("freeseek-cp-store-");
+  const globalConfig = path.join(store, "global.gitconfig");
+  const previousGlobalConfig = process.env.GIT_CONFIG_GLOBAL;
   try {
+    // Reproduce the common Windows configuration that caused rewind/materialize to rewrite LF
+    // snapshots as CRLF. The shadow repository must override this global setting.
+    fs.writeFileSync(globalConfig, "[core]\n\tautocrlf = true\n", "utf8");
+    process.env.GIT_CONFIG_GLOBAL = globalConfig;
     try { execFileSync("git", ["--version"], { stdio: "ignore" }); } catch { t.skip("git 不可用"); return; }
     git(root, ["init", "-q"]);
     git(root, ["config", "user.email", "test@example.invalid"]);
@@ -49,6 +55,8 @@ test("shadow checkpoint 不改变用户工作树/index/stash，rewind 也不删�
     assert.equal(fs.existsSync(path.join(root, "c.txt")), false);
     assert.equal(git(root, ["stash", "list"]), stashBefore);
   } finally {
+    if (previousGlobalConfig === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = previousGlobalConfig;
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(store, { recursive: true, force: true });
   }

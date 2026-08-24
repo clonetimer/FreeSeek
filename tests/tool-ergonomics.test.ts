@@ -66,6 +66,25 @@ test("run_command argv: 精确 argv 不经过 shell quoting", async () => {
   }
 });
 
+
+test("write_file: creating an empty file still emits create evidence", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "freesek-empty-create-"));
+  try {
+    const seen: any[] = [];
+    const ctx = context(root);
+    ctx.onFileDiff = (info) => seen.push(info);
+    const out = await executeToolBody("write_file", { path: "empty.txt", content: "" }, ctx);
+    assert.match(out, /已写入/);
+    assert.equal(fs.existsSync(path.join(root, "empty.txt")), true);
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].kind, "create");
+    assert.equal(seen[0].original, "");
+    assert.equal(seen[0].applied, "");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("preToolUse: run_command argv 仍进入危险命令检查", async () => {
   const out = await preToolUse("run_command", { argv: ["rm", "-rf", "/"] }, false, "");
   assert.equal(out.ok, false);
@@ -87,7 +106,8 @@ test("CLI bundle entry 使用显式构建身份，避免统一 CLI 导入子命�
   assert.match(esbuild, /__FREESEEK_CLI_ENTRY__:\s*'"cli"'/);
   assert.match(esbuild, /__FREESEEK_CLI_ENTRY__:\s*'"eval"'/);
   assert.match(esbuild, /__FREESEEK_CLI_ENTRY__:\s*'"bench"'/);
-  for (const [file, name] of [["src/cli.ts", "cli"], ["src/headless.ts", "headless"], ["src/eval-cli.ts", "eval"], ["src/bench-cli.ts", "bench"]] as const) {
+  assert.match(esbuild, /__FREESEEK_CLI_ENTRY__:\s*'"acp"'/);
+  for (const [file, name] of [["src/cli.ts", "cli"], ["src/headless.ts", "headless"], ["src/eval-cli.ts", "eval"], ["src/bench-cli.ts", "bench"], ["src/acp-server.ts", "acp"]] as const) {
     const source = fs.readFileSync(path.join(projectRoot, file), "utf8");
     assert.match(source, new RegExp(`__FREESEEK_CLI_ENTRY__ === "${name}"`));
     assert.doesNotMatch(source, /require\.main\s*===\s*module/);

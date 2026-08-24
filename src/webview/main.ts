@@ -3,7 +3,7 @@
  * FreeSeek — Webview 前端入口（esbuild iife bundle）。
  * 只负责 DOM 引用、事件接线与扩展消息分发；渲染逻辑在 components.ts / markdown.ts。
  */
-import { ui, setPost, applyTheme } from "./state";
+import { ui, setPost, applyTheme, registerPluginThemes } from "./state";
 import * as C from "./components";
 import { stripTags } from "./markdown";
 import { createBridge } from "./bridge";
@@ -1118,6 +1118,7 @@ window.addEventListener("message", (event) => {
       uiSettings = msg.settings || {};
       const skills = (msg.skills || []) as Array<{ status: string }>;
       uiSettings.skills = skills;
+      registerPluginThemes((msg.pluginThemes || []) as Array<{ name: string; label: string; css: string }>);
       applyTheme(uiSettings.theme || "default");
       updateSettingsBadge(skills.filter((s) => s.status === "pending").length);
       break;

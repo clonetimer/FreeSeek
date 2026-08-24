@@ -135,3 +135,11 @@ flowchart LR
 - 模块 ≤600 行；超限必须加文件头 `// check:max-lines N` 登记技术债并限期拆分。
 - 拆分后必须收敛豁免（见 `npm run check` 输出）。
 - 每个顶层导出符号必须有 JSDoc。
+
+## 0.20 Standalone Desktop Host
+
+The standalone desktop application is intentionally layered **outside** the Agent Kernel:
+
+`Electron Renderer → contextBridge IPC → Desktop Main → ACP v1 stdio → FreeSeek Kernel`.
+
+The Desktop Host must not import `runAgent`, `ToolRegistry`, `ToolRuntime`, or raw tool bodies. This dependency direction is enforced by `npm run check`. See `docs/project/DESKTOP_ARCHITECTURE.md`.

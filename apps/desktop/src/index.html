@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; frame-src 'none'; frame-ancestors 'none'; form-action 'none';" />
+  <title>FreeSeek Desktop</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand"><span class="mark">F</span><div><strong>FreeSeek</strong><small>Desktop · 0.22 HMR</small></div></div>
+      <section class="setup">
+        <label>Workspace</label>
+        <div class="inline"><input id="workspace" placeholder="Choose a project folder" /><button id="chooseWorkspace" type="button">…</button></div>
+        <label>Provider Base URL</label><input id="baseUrl" value="http://127.0.0.1:1234/v1" />
+        <label>Model</label><input id="model" value="local-model" />
+        <div class="two-col">
+          <label>Format<select id="format"><option value="openai">openai</option><option value="claude">claude</option><option value="gemini">gemini</option></select></label>
+          <label>Tool mode<select id="toolMode"><option value="native">native</option><option value="react">react</option></select></label>
+        </div>
+        <label>API Key <small id="secretStatus">not stored</small></label><input id="apiKey" type="password" autocomplete="off" placeholder="One-time or save securely" />
+        <label>Auth</label><select id="authType"><option value="none">none</option><option value="bearer">bearer</option><option value="x-api-key">x-api-key</option><option value="x-goog-api-key">x-goog-api-key</option></select>
+        <div class="secret-actions"><button id="saveSettings" type="button">Save settings</button><button id="forgetSecret" type="button">Forget key</button></div>
+
+        <details>
+          <summary>Runtime & integrations</summary>
+          <label class="check"><input id="allowShell" type="checkbox" /> Allow shell/code execution</label>
+          <label class="check"><input id="allowNetwork" type="checkbox" checked /> Allow network tools</label>
+          <label class="check"><input id="enableSkills" type="checkbox" checked /> Enable Skills</label>
+          <label class="check"><input id="enableMultiAgent" type="checkbox" /> Enable optional Multi-Agent</label>
+          <label>Additional workspace roots <small>one absolute path per line</small></label><textarea id="additionalDirectories" class="compact-textarea"></textarea>
+          <label>Extra Skill roots <small>one absolute path per line</small></label><textarea id="skillDirs" class="compact-textarea"></textarea>
+          <label>Trusted Extension roots <small>explicit operator trust roots; one absolute path per line; applied on ACP connect</small></label><textarea id="extensionDirs" class="compact-textarea"></textarea>
+          <label>Untrusted Extension sandbox policy <small>optional absolute JSON file; H4 grants are startup-only</small></label><input id="extensionSandboxPolicyFile" type="text" placeholder="/absolute/path/extension-sandbox-policy.json" />
+          <label>MCP stdio JSON <small>env values are runtime-only and never persisted</small></label><textarea id="mcpServers" class="compact-textarea" placeholder='[{"name":"demo","command":"node","args":["server.cjs"]}]'></textarea>
+        </details>
+
+        <button id="start" class="primary">Start FreeSeek</button>
+        <div class="history-head"><span>History</span><button id="refreshHistory" type="button">Refresh</button></div>
+        <input id="historySearch" type="search" placeholder="Search history" aria-label="Search session history" />
+        <select id="historyList" size="5" aria-label="Session history"></select>
+        <button id="resumeSession" type="button" disabled>Load selected</button>
+      </section>
+      <div class="scope"><strong>Architecture boundary</strong><span>Electron UI → ACP v1 → FreeSeek Kernel</span><span>Renderer has no fs/process/ToolRuntime access.</span></div>
+    </aside>
+
+    <main class="main">
+      <div id="recoveryBanner" class="recovery hidden"><div><strong>Interrupted turn detected</strong><span id="recoveryText"></span></div><div><button id="dismissRecovery" type="button">Dismiss</button><button id="recoverSession" class="primary" type="button">Load session</button></div></div>
+      <header><div><h1>Agent Workspace</h1><div id="status" role="status" aria-live="polite">Ready</div></div><div class="header-actions"><button id="detailsToggle" type="button" aria-expanded="true" aria-controls="detailsPane">Details</button><select id="mode" disabled><option>coder</option><option>craft</option><option>plan</option><option>ask</option></select><button id="closeSession" type="button" disabled>Close</button></div></header>
+      <div id="workarea" class="workarea">
+        <section class="conversation-pane" aria-label="Conversation">
+          <div class="pane-heading"><span>Conversation</span><small>ACP session projection</small></div>
+          <div id="conversationWindowControls" class="window-controls hidden" aria-live="polite">
+            <button id="conversationPrev" type="button">Earlier</button><span id="conversationWindowInfo"></span><button id="conversationNext" type="button">Later</button><button id="conversationLatest" type="button">Latest</button>
+          </div>
+          <div id="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions"><div class="empty"><h2>Standalone FreeSeek</h2><p>选择工作区和 Provider。Desktop 只负责宿主交互，通过 ACP sidecar 复用 Stable Kernel。</p></div></div>
+        </section>
+        <aside id="detailsPane" class="details-pane" aria-label="Trajectory and artifact details">
+          <div class="details-tabs" role="tablist" aria-label="Details views">
+            <button id="trajectoryTab" class="details-tab active" type="button" role="tab" aria-selected="true" aria-controls="trajectoryPanel">Trajectory</button>
+            <button id="artifactTab" class="details-tab" type="button" role="tab" aria-selected="false" aria-controls="artifactPanel">Artifact</button>
+            <button id="extensionsTab" class="details-tab" type="button" role="tab" aria-selected="false" aria-controls="extensionsPanel">Extensions</button>
+          </div>
+          <section id="trajectoryPanel" class="details-panel trajectory-panel" role="tabpanel" aria-labelledby="trajectoryTab">
+            <div class="panel-summary"><strong>Session trajectory</strong><span id="trajectoryCount">0 events</span></div>
+            <div class="trajectory-toolbar">
+              <input id="trajectorySearch" type="search" placeholder="Search trajectory" aria-label="Search trajectory" />
+              <select id="trajectoryFilter" aria-label="Filter trajectory">
+                <option value="all">All</option><option value="turn">Turns</option><option value="tool">Tools</option><option value="interaction">Permissions & input</option>
+                <option value="message">Messages</option><option value="reasoning">Reasoning</option><option value="mode">Mode</option><option value="event">Other</option>
+              </select>
+              <small class="trajectory-note">Turn numbers follow projected user-message order. Historical permission/input decisions are shown only when ACP/Host delivers them; Desktop does not infer missing lifecycle facts.</small>
+            </div>
+            <div class="trajectory-window-controls" aria-live="polite">
+              <button id="trajectoryPrev" type="button">Earlier</button><span id="trajectoryWindowInfo">0–0</span><button id="trajectoryNext" type="button">Later</button><button id="trajectoryLatest" type="button">Latest</button>
+            </div>
+            <div id="trajectoryList" class="trajectory-list" role="listbox" aria-label="Session trajectory"><div class="trajectory-empty">Turns, reasoning, tool calls, mode changes and host interactions will appear here.</div></div>
+            <div id="trajectoryDetail" class="trajectory-detail" role="region" aria-live="polite" aria-label="Trajectory event detail">Select a trajectory item to inspect its projected ACP/Host lifecycle.</div>
+          </section>
+          <section id="artifactPanel" class="details-panel artifact-panel hidden" role="tabpanel" aria-labelledby="artifactTab">
+            <div class="panel-summary"><strong>Evidence-backed files</strong><span id="artifactCount">0 files</span></div>
+            <div class="artifact-section-label">Produced deliverables</div>
+            <div id="artifactDeliverables" class="artifact-deliverables"><span class="artifact-empty">No produced files projected yet.</span></div>
+            <div class="artifact-section-label">References & mutations</div>
+            <div id="artifactEvidenceList" class="artifact-evidence-list"><div class="artifact-empty">Successful file-tool evidence will appear here.</div></div>
+            <div id="artifactEvidenceDetail" class="artifact-evidence-detail" role="region" aria-live="polite" aria-label="Artifact evidence detail">Select an evidence-backed file to inspect its projected lifecycle and structured diff.</div>
+            <div class="artifact-section-label">Authorized current-file access</div>
+            <input id="artifactPath" placeholder="Relative or authorized absolute path" />
+            <div class="artifact-actions"><button id="previewArtifact" type="button" disabled>Preview</button><button id="openArtifact" type="button" disabled>Open</button></div>
+            <div id="artifactMeta" class="artifact-meta">No artifact selected.</div>
+            <pre id="artifactPreview" class="artifact-preview"></pre>
+            <div class="panel-note">Evidence above comes only from ACP tool updates backed by successful file-tool callbacks. Preview/Open are separate current-filesystem actions mediated by Electron main and constrained to ACP-authorized workspace roots; Desktop does not crawl the workspace or infer missing diffs.</div>
+          </section>
+          <section id="extensionsPanel" class="details-panel hidden" role="tabpanel" aria-labelledby="extensionsTab">
+            <div class="panel-summary"><strong>Trusted Extensions</strong><span id="extensionsCount">0 extensions</span></div>
+            <div class="trajectory-toolbar">
+              <button id="extensionsRefresh" type="button">Refresh</button><button id="extensionsReconcile" type="button">Reconcile</button>
+              <small class="trajectory-note">Trust roots come only from Desktop launch settings. Disable/remove retires runtime state but never deletes package bytes.</small>
+            </div>
+            <div id="extensionRoots" class="artifact-evidence-copy">No Extension trust roots configured.</div>
+            <div id="extensionsList" class="artifact-evidence-list"><div class="artifact-empty">Connect an ACP sidecar with trusted Extension roots to inspect HMR state.</div></div>
+            <div id="extensionDetail" class="artifact-evidence-detail" role="region" aria-live="polite" aria-label="Extension detail">Select an extension to inspect status and recent durable audit events.</div>
+          </section>
+        </aside>
+      </div>
+      <footer><textarea id="composer" disabled placeholder="Ask FreeSeek to inspect, edit or verify this project…"></textarea><div class="actions"><button id="stop" disabled>Stop</button><button id="send" class="primary" disabled>Send</button></div></footer>
+    </main>
+  </div>
+
+  <div id="hostDialog" class="dialog-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="hostDialogTitle" aria-describedby="hostDialogMessage">
+    <div class="host-dialog">
+      <h3 id="hostDialogTitle">FreeSeek needs input</h3>
+      <p id="hostDialogMessage"></p>
+      <pre id="hostDialogDetail" class="dialog-detail hidden"></pre>
+      <div id="hostDialogField" class="dialog-field"></div>
+      <div id="hostDialogActions" class="dialog-actions"></div>
+      <button id="hostDialogCancel" class="dialog-cancel" type="button">Cancel</button>
+    </div>
+  </div>
+  <script src="./renderer.js"></script>
+</body>
+</html>

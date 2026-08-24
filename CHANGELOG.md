@@ -1,4 +1,267 @@
+# 0.26.0 — Plugin Ecosystem: 插件加装（npm / git / file）+ 套件皮肤 Themes — 2026-08-24
+
+在 0.25.0 的 5 项缺口之上，补齐"插件加装"这一产品形态（对标 `dsh plugin --profile web add <spec>`），并使套件具备可注入的 UI 皮肤：
+
+- **插件管理 CLI**：新增 `src/plugin.ts` 与 `src/plugin-cli.ts`，`freeseek plugin add <spec> [--root <dir>]` / `remove <name>` / `list [--json]`。spec 支持三种来源：`npm:`（裸 `@scope/pkg@ver` 默认按 npm registry）经 `npm pack` → 专用缓存目录 tar 解包（用完即删）；`git:`（含 `github:user/repo` 短路径）经 `git clone --depth 1`；`file:` / 绝对路径本地目录直取。`remove` 依据 `.agent/kits.json` 注册表逆操作。
+- **套件定位与落地**：下载包内按 `plugin.json` 或 `package.json` 的 `freesek.plugin` 声明定位套件根（对齐 dsh.bundle 语义）；落地复用 `installKit` / `uninstallKit`（`src/kits.ts`），把 skills / commands / agents / themes 安装到项目 `.agent/` 并登记注册表，卸载可逆。
+- **套件皮肤（Themes）**：`KitManifest` 新增 `themes?: { name; file? }[]`，安装后写入 `.agent/themes/<name>.css`；`listInstalledThemes`（`src/plugin.ts`）扫描该目录供宿主下发。Web Console 与 VS Code 设置面板主题下拉动态包含已安装皮肤，`registerPluginThemes` + `applyTheme`（`body[data-theme]`）注入，纯 CSS 变量覆盖，不影响其余渲染逻辑。
+- **文档**：`docs/cli.md` 增补 `plugin` 命令与 spec 语法；套件 themes 类型与皮肤注入见 `src/kits.ts` 与 `src/plugin.ts`。
+
+# 0.25.0 — Gap Closure: TUI / ExecPolicy DSL / Remote Sandbox / Web Approval / SDK — 2026-08-24
+
+补齐相对 codex / deepseek-harness 的 5 项可见缺口（详见 `FreeSeek-vs-codex-vs-deepseek-harness` 架构对比）：
+
+- **缺口1 · 交互式终端（TUI）**：新增 `src/tui.ts` 全交互会话视图，对标 codex 的 TUI——实时流式渲染助手文本（按词边界 flush 防撕裂）、工具调用进度卡、状态指示器，以及键盘审批（`y`/Enter 批准、`N` 拒绝）。非 TTY（管道/CI）自动降级为朴素流式。`freeseek --tui`（仅本地命令运行用 `node dist/freeseek-headless.js --tui`）。
+- **缺口2 · 声明式命令策略语言**：`src/sandbox.ts` 新增 `ExecPolicyDocument` DSL（`compileExecPolicy` / `loadExecPolicyDocument` / `applyPolicyDecision`），对标 codex execpolicy——`default` 档 + 规则集，匹配维度覆盖 cmd 字面量 / 正则 / effect 类别 / OS / 网络意图，结果档位 allow / deny / ask / sandbox / readonly。经 `--exec-policy policy.json` 注入 `run_command` 执行前评估，优先于原有正则 allow/deny。
+- **缺口3 · 远程/云沙箱 provider 实装**：`src/remote-sandbox.ts` 新增三种可落地 transport（`createLocalDockerRemoteSandboxTransport` docker exec / `createSshRemoteSandboxTransport` SSH / `createE2BRemoteSandboxTransport` E2B API），取代原仅协议定义。经 `--sandbox remote:docker@<container>` / `remote:ssh@<host>` / `remote:e2b@<id>`（环境变量 `E2B_API_KEY`）通过 `seam.setCommandRunner` 注入，工具执行链路零改动。
+- **缺口4 · 浏览器端交互审批与 ask_user 表单**：Web Console 的 `requestPermission` / `requestElicitation` 由 fail-closed stub 改为「经 SSE 推送到浏览器 + 等待回传」；新增 `/api/session/respond` 端点；`ui.ts` 渲染审批卡（按钮回传 decision）与按 `requestedSchema` 生成的结构化表单（字段收集回传）。`freeseek web --experimental` 即可在浏览器中完成审批与 ask_user。
+- **缺口5 · 官方 TS SDK**：新增 `src/sdk.ts`（稳定再导出 `runAgent` / `ToolRegistry` / `ToolRuntime` / `builtinToolDefinitions` / 远程沙箱 provider / 策略 DSL / ACP server+client），`package.json` 增加 `exports[: "." | "./sdk" | "./acp"]` 与 `freeseek-sdk` bin；新增 `src/sdk-cli.ts` 提供 `freeseek-sdk run|acp|version` 子命令。第三方 `require("freeseek")` / `import "freeseek"` 即可调用内核。
+- **修复（SDK CLI 与 headless 衔接）**：headless 原生支持 `--mode coder|plan|ask`（含 `FREESEEK_MODE` 环境变量；`plan`/`ask` 触发只读拦截，`coder` 保持 0.24 行为不变），`--tool-mode`/`--auth-type` 校验对齐；`sdk-cli.ts` 修复 `runHeadless` argv 前缀（去除 `node`/`freeseek-sdk`）与 `--cwd → --workspace` 映射，使 `freeseek-sdk run` 首次可用；`docs/sdk.md`、`docs/cli.md`、`docs/web-console.md`、`docs/remote-sandbox.md` 同步落地文档。
+
+# 0.24.0 — Web Console Host — 2026-08-24
+
+- **新增产品形态：Web Console**（本地回环 HTTP 服务 + 浏览器端，对标可编译后浏览器访问的本地服务形态）：
+  架构与 Desktop 同构——`Browser → HTTP/SSE → WebConsoleServer → ACP client → freeseek-acp sidecar → 共享 Kernel`，
+  只做协议/控制面，不复制任何 ToolRuntime/权限逻辑。入口 `freeseek web` / `freeseek-web`（默认 `127.0.0.1:3080`）。
+- 浏览器端单页控制台：会话列表/新建/恢复、流式消息（SSE）、工具调用卡片、模式切换（coder/craft/plan/ask）、停止；
+  所有模型与工具文本经 HTML 转义渲染，零依赖（原生 fetch + EventSource）。
+- 安全默认：仅监听回环地址；随机访问令牌（`/?token=`）授权全部 `/api/*`；同源校验拒绝跨源浏览器请求（防 CSRF / DNS 重绑定）；
+  未显式 `--yes` 时工具权限请求按取消处理（fail-closed）。
+- `HostKind` 契约新增 `web`；宿主能力矩阵登记 Web Console（交互输入/权限审批/持久会话/富展示；无编辑器原生能力）。
+- 新增 `tests/web-console.test.ts`（UI 鉴权、跨源拒绝、HTTP+SSE 真实回合、能力声明），全套通过；`npm run check` 8/8 保持。
+- 文档：新增 `docs/web-console.md` 与 `docs/deployment/` 全形态部署/使用说明（CLI、ACP、VS Code、Desktop、Web Console、Eval/Bench、Core 嵌入）。
+
+# 0.23.0 — Verification & Cross-platform Hardening — 2026-08-23
+
+- Freeze the 0.22.0 source-stable baseline plus a verification/hardening pass into one new source baseline.
+- **Fix hookify hot-reload cache race**: `loadHookifyRules` cache key now includes file size, and `toggleHookifyRule` explicitly bumps mtime after writing, so a same-size rapid toggle (`enabled:false → true`) is always observed instead of returning a stale cached rule.
+- **Fix test-infrastructure layout defects (P1)**: `acp-cli-stdio`, `desktop-runtime-e2e` and `extension-management-host-wiring` now resolve compiled entries / source roots robustly across the esbuild bundle layout, the tsc-fallback mirror layout, ts-node direct runs and the production `dist/` build; `scripts/test.mjs` pre-stages the `acp-server`/`cli` CLI bundles (without the auto-run entry define) so the esbuild path is self-contained; `ChildRpc` requests now fail fast on child-process exit and time out instead of hanging forever.
+- **Add missing platform gates (P3)**: ACP/Headless H4 untrusted-sandbox E2E tests and the sandbox-policy symlink-rejection test now skip (instead of failing) on platforms without Linux namespaces / symlink privilege, matching the existing `extension-sandbox` suite.
+- **Fix Windows ESM import (P4)**: `desktop-portable-install` tests load `scripts/lib/desktop-portable-install.mjs` via `require` of the absolute path (tsc CJS emit rewrites dynamic `import()` to `require(file://…)`, which is invalid on Windows).
+- Keep the 0.22.0 functional surface (Kernel / CLI / ACP / VS Code / Desktop / HMR H0-H4) unchanged; this release is source verification and cross-platform hardening only.
+
+# 0.22.0-dev.4 — General HMR H4 — 2026-08-22
+
+- Add Linux-first out-of-process execution for `trust=untrusted` Extension tools; `ExtensionRuntime` requires sandbox execution attestation and never falls back to Host-process `require()` for untrusted packages.
+- Isolate workers with unprivileged user/mount/PID/IPC/UTS/network namespaces, chroot, a cleared environment and Node Permission Model; package bytes are copied to a bounded immutable snapshot and package symlinks/non-regular files fail closed.
+- Add startup-only Host sandbox policy grants for filesystem roots and exact HTTP(S) origins. Untrusted code accesses them only through bounded call-bound IPC brokers, and network broker use additionally requires that exact tool's Runtime metadata declares `requiresNetwork=true`.
+- Keep shell/process spawn closed in H4 v1; direct host filesystem reads, child process creation and direct network access are contained by executable isolation rather than capability metadata alone.
+- Preserve generation semantics across process boundaries: watcher V1→V2 reload leaves leased V1 workers alive, failed candidates retain the old worker as LKG, and retired workers dispose after the final generation lease releases.
+- Add timeout/kill, protocol-corruption and oversized-result containment plus durable sandbox lifecycle/status audit through H3 management; ACP and Headless accept the same startup-only policy, Desktop/VS Code forward explicit policy configuration without giving Renderer/plugin UI Runtime ownership.
+- H4 v1 is deliberately Linux-only and Tool-only for untrusted packages; unsupported platforms, shell, and untrusted Connector/Skill/Hook/MCP/UI contributions fail closed. This is not claimed as a VM/hypervisor boundary against Node/Linux kernel vulnerabilities.
+- Keep the frozen 0.21.0-rc.1 release candidate unchanged and do not create `v0.21.0`.
+
+# 0.22.0-dev.3 — General HMR H3 — 2026-08-22
+
+- Add a host-neutral Extension management plane with explicit `list/status/reload/remove/reconcile/config/audit` semantics; remove/disable retires runtime state and persists operator intent but never deletes package bytes or expands trust roots.
+- Add durable process-level HMR audit (`runtime`/`watcher`/`management`) with bounded in-memory projection and 8 MiB file rotation, while keeping per-session generation lease/release provenance in the existing EventLog.
+- Add managed health projection for `ok`, last-known-good `degraded`, `pending`, `error`, `disabled`, `conflict` and `absent`; corrupt operator intent fails closed so disabled trusted code cannot silently reactivate.
+- Add FreeSeek-namespaced ACP JSON-RPC management, provider-free Headless one-shot management, Desktop operator UX through preload/main/ACP, and VS Code explicit-root management using global host state.
+- Preserve H0-H2 generation leases, atomic reload/LKG rollback and explicit trust roots; H3 does not add workspace auto-scan, Renderer plugin APIs, package-byte deletion or capability widening.
+- Keep H4 untrusted/model-generated out-of-process sandbox deferred and keep the frozen 0.21.0-rc.1 release candidate unchanged without creating `v0.21.0`.
+
+# 0.22.0-dev.2 — General HMR H2 — 2026-08-22
+
+- Add generation-snapshotted Skill roots/assets with read-only run-local SkillManager overlays, package containment/symlink checks and bounded candidate bytes; old leases keep old Skill content across reload.
+- Add generation-pinned Policy and pre/post Hook contributions inside ToolRuntime with monotonic semantics: extensions may block/warn or append post-tool notes but cannot grant permission or bypass built-in deny/approval/sandbox gates.
+- Add generation-owned MCP tool contribution adapters and declarative package `mcpServers`; stdio requires explicit `shell=true`, HTTP requires `network=true`, and retired connections stay alive until old generation leases release.
+- Preserve H0/H1 atomic generation semantics and trusted explicit `--extension-dir` roots; package contribution failures keep last-known-good.
+- Keep H2 MCP scope to tools only; cross-host management/durable operator UX remains H3 and untrusted/model-generated out-of-process sandbox remains H4.
+- Keep the frozen 0.21.0-rc.1 release candidate unchanged; no `v0.21.0` Stable tag is created by the HMR line.
+
+# 0.22.0-dev.1 — General HMR H0/H1 — 2026-08-22
+
+- Start `dev/0.22-hmr` from the exact frozen `0.21.0-rc.1` candidate without modifying the pending 0.21 release candidate.
+- Add a host-neutral Extension Runtime with generation staging, immutable Agent-run leases, retained child leases, reversible effects, dependency `PENDING`, last-known-good rollback and audit callbacks.
+- Bind extension tool definitions to generation-specific executors inside `ToolRegistry`; unknown extension schemas fail closed instead of falling back to the raw tool-body dispatcher.
+- Add trusted CommonJS package loading plus bounded dependency-free filesystem polling HMR, with duplicate-ID rejection, package-entry containment checks, syntax/activation rollback and lease-safe removal.
+- Add explicit `--extension-dir` trust roots for ACP/Headless and one process-shared HMR runtime across ACP sessions; Desktop ACP launch options can forward the same contract.
+- Keep v1 intentionally trusted-only: no automatic workspace plugin execution, host UI plugin API, untrusted/model-generated in-process execution, or 0.21 Stable promotion.
+
+# 0.21.0-rc.1 candidate — 2026-08-22
+
+- Freeze Desktop UI Experience Convergence U0–U5 for local/internal Stable validation.
+- Typed ACP presentation cards, Trajectory Inspector, evidence-backed file diffs/deliverables, bounded long-session rendering, incremental safe Markdown and accessibility hardening are all included.
+- Fix RC metadata promotion so the documented alpha/beta prerelease line can legally enter same-base `rc.1` without allowing prerelease-to-Stable shortcuts.
+- Candidate source/contract validation passes 22 focused UI/release tests plus Renderer strict TypeScript; exact Windows x64 Electron/package/recovery/interop validation remains required before 0.21.0 local Stable is frozen.
+- General HMR remains outside this release line.
+
+# 0.21.0-beta.1 — Desktop UI Experience Convergence U5
+
+- Add incremental, HTML-safe assistant Markdown rendering: stable blocks are committed once, mutable streaming tail is capped at 8K characters, and forced splits preserve fenced-code context instead of dropping code semantics.
+- Batch reasoning updates per animation frame and append text nodes instead of rewriting the accumulated reasoning transcript on every chunk.
+- Bound mounted long-session work with 120-entry Conversation and 160-row Trajectory windows while preserving projected models and bidirectional navigation to older entries.
+- Bound trajectory search/detail, structured tool blocks and artifact diffs; full large values are serialized or mounted only after explicit expansion.
+- Add keyboard/focus/ARIA hardening for tabs, trajectory rows, collapsible details and permission/elicitation dialogs, plus reduced-motion handling.
+- Add U5 stress budgets for 12,000 streamed chunks, 100,000-row window math, long fenced code, huge structured values and the existing 5,000-row trajectory search regression.
+- Keep Desktop UI as an ACP/Host projection: no Renderer filesystem/EventLog/ToolRuntime access, no server-side paging fiction, and no General HMR transition.
+
+# 0.21.0-alpha.1 — Desktop UI Experience Convergence U4
+
+- Project successful file reads and mutations as evidence-backed ACP v1 tool-call fields instead of parsing tool-result prose or crawling the workspace.
+- Correlate `onFileRead` / `onFileDiff` callbacks to the executing provider `toolCallId` inside ToolRuntime, preserving correctness for parallel-safe file reads and preventing body-supplied IDs from overriding provenance.
+- Persist file evidence in the existing durable EventLog and restore it during ACP `session/load`; legacy sessions without evidence remain explicitly evidence-empty.
+- Add standard ACP `locations` plus structured `diff` content for create/write/edit and namespaced FreeSeek provenance for operation kind, path, line-change counts and produced-file status; empty-file creates are preserved as real deliverables.
+- Keep delete evidence honest: current `delete_file` does not retain a complete arbitrary pre-delete snapshot, so Desktop shows a confirmed deletion without inventing a diff.
+- Add the U4 Artifact experience: produced-file chips, per-path read/mutation grouping, structured Before/After inspection, tool navigation, and evidence links shared by Conversation and Trajectory cards.
+- Keep current-file Preview/Open behind the existing Electron-main authorized-root boundary; Renderer still has no filesystem/EventLog/ToolRuntime access.
+- Keep incremental Markdown, virtualization, broader large-output/performance/accessibility work in U5 and keep General HMR deferred.
+
+# 0.21.0-dev.3 — Desktop UI Experience Convergence U3
+
+- Add a renderer-safe Trajectory Inspector model for turn, message/reasoning, tool, mode, permission, elicitation and unknown ACP/Host lifecycle rows.
+- Add semantic category filters plus tokenized search backed by a bounded cached index so long sessions remain inspectable without reading EventLog/session files from Renderer.
+- Add bidirectional tool navigation: Conversation tool cards can open their Trajectory row, and Trajectory details can jump back to the projected conversation/tool target.
+- Keep lifecycle evidence honest: live turns use `session/prompt` stop state; replayed history turns are labeled `history` because ACP does not expose persisted turn-end/stop metadata. Historical permission/elicitation decisions are not inferred when Host does not replay them.
+- Do not introduce timestamps/durations, structured diffs/deliverables, incremental Markdown, virtualization or General HMR ahead of their protocol/milestone boundaries.
+- Keep `0.20.0 Stable` frozen and preserve the Desktop → ACP → shared Kernel boundary.
+
+# 0.21.0-dev.2 — Desktop UI Experience Convergence U2
+
+- Add a renderer-safe Presentation Registry for terminal/execute, read, search, mutation, web/fetch, code/JSON and generic tool/output cards.
+- Reuse one ACP-derived presentation model in both Conversation cards and Trajectory details so tool lifecycle semantics do not drift between panes.
+- Keep mutation cards evidence-honest: U2 shows the projected request/result only; structured diffs and deliverables remain U4.
+- Reserve assistant Markdown/reasoning presentation intents while leaving incremental Markdown, virtualization and accessibility/performance hardening to U5.
+- Harden the Desktop development build by bundling the sandboxed renderer as an esbuild browser IIFE; General HMR remains absent.
+- Keep `0.20.0 Stable` frozen; no Agent/Kernel fork, RC/Stable rerun, publishing/signing work or General HMR was introduced.
+
+# 0.21.0-dev.1 — Desktop UI Experience Convergence U0/U1
+
+- Freeze 0.20.0 Stable separately, then open `dev/0.21-ui`; General HMR remains deferred.
+- Add a renderer-safe ACP presentation projector for assistant/reasoning/tool/mode/unknown session updates.
+- Introduce a three-pane Desktop shell: Workspace/History, Conversation, and collapsible Trajectory/Artifact details.
+- Reuse the same ACP projection for typed tool cards and trajectory rows; Renderer still has no direct EventLog, ToolRuntime or filesystem access.
+- Add focused UI presentation contract tests and browser-bundle validation.
+
+# 0.20.0 — 2026-08-21
+
+- Standalone Desktop Host promoted to local/internal Stable.
+- Windows x64 exact Electron 43.3.0, DPAPI, packaged E2E and forced-kill recovery validated.
+- Candidate-bound ACP interoperability validated with two independent ACP clients.
+- Public distribution signing intentionally deferred; no General HMR in this release.
+
 # FreeSeek 变更日志
+
+## 0.20.0-dev.3 — Desktop session/resume UX foundation
+
+- Add Desktop ACP connect/list/resume lifecycle so durable sessions can be discovered by workspace and resumed without reading EventLog files directly.
+- Extend the real DesktopRuntime child-process E2E to close, list, resume and continue the same session.
+- Add sidebar session history/Resume controls.
+- Replace browser-native `window.confirm/window.prompt` with first-class ACP permission/elicitation dialogs driven by server-provided options/schema.
+- Keep real Electron BrowserWindow execution as the unchanged `alpha.1` gate.
+
+## 0.20.0-dev.2 — Desktop runtime E2E checkpoint
+
+- Extract `DesktopRuntimeController` so ACP child/session lifecycle is host-tested independently from Electron presentation code.
+- Add a real Desktop Runtime → `freeseek-acp` child-process E2E covering initialize/new/prompt streaming/mode/list/EventLog/close.
+- Fix compiled Desktop repo-root discovery and the stale `electron dist/main.js` start path.
+- Add an opt-in real Electron BrowserWindow smoke runner that drives the public contextBridge API and ACP sidecar when Electron 43.3.0 is available.
+- D1-A is closed; D1-B (real BrowserWindow execution) remains the `0.20.0-alpha.1` gate.
+
+## 0.20.0-dev.1 — Standalone Desktop development baseline
+
+- Open `dev/0.20` from the frozen 0.19.0 Cross-host Stable baseline.
+- Add the first standalone Desktop Host: Electron shell, sandboxed renderer/preload boundary and ACP child-process client.
+- Add a hard architecture gate preventing Desktop code from importing Agent/ToolRuntime/Tools directly.
+- Add Desktop ACP protocol tests, desktop build contract and 0.20 project ledger/roadmap.
+- General HMR remains deferred until Desktop Stable.
+
+
+## v0.19.0 Stable（Cross-host Platform）
+
+- **FreeSeek 正式成为多宿主 Agent 平台**：VS Code Extension、CLI/Headless、ACP v1 stdio Agent Server 共用同一 Kernel、ToolRegistry/ToolRuntime、EventLog 与安全边界。
+- **ACP Stable**：生命周期、resume/cancel/mode、permission、elicitation、additionalDirectories、MCP、Skills/Multi-Agent policy 均完成跨宿主硬化。
+- **独立互操作闭环**：官方 TypeScript SDK 1.3.0 + OpenClaw acpx 0.13.0 两个独立 ACP Client 已实跑通过；官方 SDK 额外覆盖 additionalDirectories 与 resume。
+- **跨平台/发行闭环**：Windows checkpoint/autocrlf、symlink 权限、Node builtin bundling、stable-contract smoke、VSIX/TGZ packaging 均闭环。
+- **后续顺序冻结**：0.19 Stable 后先开发 Standalone Desktop UI，再考虑 General HMR Extension Runtime。
+
+## v0.19.0-rc.1（Cross-host RC：External ACP Interop Closed）
+
+- **M4 闭环**：Windows beta.7 现场验证已实际跑通官方 `agentclientprotocol/typescript-sdk 1.3.0` 与 OpenClaw `acpx 0.13.0` 两个独立 ACP Client；官方 SDK 额外覆盖 `additionalDirectories` 与 `resume`。
+- **发行形态已验证**：beta.7 Windows 现场的 stable-contract smoke 通过，VSIX 与 npm/CLI TGZ 均成功生成。
+- **Gate 参数解析修复**：`--min-clients 2` 的 `2` 不再被误当成第三个 report path，并新增 CLI 回归测试。
+- **范围冻结**：RC.1 不修改 `src/` 或 `esbuild.js`；Agent Kernel、VS Code、CLI/Headless、ACP v1 Runtime 与 beta.7 完全一致。
+
+## v0.19.0-beta.7 candidate（Release Smoke Contract + Validation Resume Hotfix）
+
+- **Smoke 去除私有符号耦合**：不再要求生产压缩 bundle 保留 `encodeBuffer` 等内部函数名；改为检查 package `main/bin` 映射、Node Host shebang/语法、稳定 command/view/message contract。
+- **Windows beta.6 现场证据**：repository gates 8/8；production build 已成功生成 VS Code / CLI / ACP / Eval / Bench / Webview / Mermaid 全部 bundle；失败仅发生在过时 smoke 私有标记断言。
+- **验证产物不再污染 Git**：`.gitignore` 固定忽略本地 validation evidence 目录/证书，续跑脚本只对白名单生成物放行，其他未提交内容仍 fail-closed。
+- **Candidate restore 兼容**：恢复脚本使用 `dev/0.19` 分支直接 clone，并用 `git tag --points-at HEAD` 检查可选 tag；未打 tag 的 candidate 不再被当作错误。
+- **内部复验**：`npm run check` 8/8、`npm test` 351/351、ACP conformance 15/15。等待 Windows 从现有 beta.6 工作树 fast-forward 后直接续跑 artifact smoke/package + 2-client interop。
+
+## v0.19.0-beta.6 candidate（Production Bundle Node Builtin Hotfix）
+
+- **Node builtin bundle 修复**：Headless 的 `readline/promises` 改为显式 `node:readline/promises`，避免 esbuild 在 Windows 生产 bundle 中把 Node 内置子路径误当第三方包解析。
+- **Node Host external 策略**：Extension / CLI / ACP / Eval / Bench 的 esbuild 配置统一 externalize `node:*`，后续新增 `node:fs/promises` 等内置子路径也保持宿主运行时解析。
+- **构建回归锁定**：新增 release-pipeline 测试，禁止重新引入裸 `readline/promises` 或丢失 `node:*` external。
+- **Windows beta.5 现场证据**：repository gates 8/8；full regression 349 total / 0 fail（4 个平台 gated skip）；ACP conformance 15/15。唯一产品失败点为生产 build 的 `readline/promises` resolve。
+- **beta.6 内部门禁**：`npm run check` 8/8、`npm test` 350/350、ACP conformance 15/15。等待同一 commit 的 Windows production build / package / 2-client interop 继续验证后再决定 tag/RC。
+
+## v0.19.0-beta.5 candidate（Windows Cross-platform Checkpoint Hotfix）
+
+- **Shadow checkpoint Git 配置隔离**：独立 shadow repo 显式 `core.autocrlf=false`，不再继承用户全局 Git 行尾策略，避免 Windows `rewind/materialize` 把 LF 快照改写为 CRLF。
+- **Windows 回归固化**：checkpoint 测试主动模拟全局 `core.autocrlf=true`，以后 Linux CI 也能复现并阻止该类 Windows 行尾回归。
+- **Symlink 权限语义**：Remote Sandbox realpath containment 在可创建 symlink/junction 的平台继续强制验证；环境返回 EPERM/EACCES/ENOTSUP 时明确 skip，而不是把系统权限限制记作产品失败。
+- **现场证据**：beta.4 Windows 验证已确认 repository gates 8/8 通过；349 项回归中的 3 个失败均定位到上述跨平台问题。
+- **候选门禁**：本地 `npm run check` 8/8、`npm test` 349/349、ACP conformance 15/15。等待 Windows beta.5 candidate 重跑后再创建正式 tag。
+
+## v0.19.0-beta.4（M4/M5：Cross-host Release Hardening）
+
+- **三宿主能力审计**：新增 `HOST_CAPABILITY_MATRIX.md` 与回归测试，锁定 VS Code、CLI、ACP、Eval 的默认/可选宿主能力，禁止静默降级。
+- **ACP 生产产物门禁**：`smoke.mjs` 现在强制检查 `dist/freeseek-acp.js` 存在、尺寸与 shebang 完整性。
+- **发布流程重构**：`release.mjs` 不再自行修改单一版本源；只允许对已提交、版本一致的工作树打包。
+- **RC/Stable 不可绕过**：发布流水线强制全量测试、ACP conformance，并在 RC/Stable 要求两份独立 ACP Client evidence report。
+- **双发行形态**：生产发布同时生成 VSIX 与 npm/CLI TGZ，并生成 SHA256SUMS。
+- **当前边界**：源码门禁全绿，但本 Linux 环境只有 Windows esbuild 原生包，生产 bundle 需在匹配平台 `npm ci` 后验证；独立 ACP Client 仍 0/2，因此保持 Beta。
+- **验证**：版本晋升前 `npm run check` 8/8、`npm test` 349/349；beta.4 tag 前重新执行 check/test/conformance。
+
+## v0.19.0-beta.3（M4：独立 ACP Client 证据门禁与 Cross-host 收口）
+
+- **独立实现硬门禁**：新增 `npm run acp:interop:gate`；RC 必须提供两个不同 `implementationOwner/implementationId` 的外部 Client 报告，且每份都证明 initialize/new/prompt/sessionUpdate。
+- **高级能力证据**：两份外部证据中至少一份必须覆盖 resume / additionalDirectories / permission / elicitation / mode 等非基线能力，禁止用两个只做握手的客户端凑数。
+- **外部 Client 适配器**：预置官方 `@agentclientprotocol/sdk` 与 `acpx` adapter-only driver；协议实现来自外部依赖，FreeSeek 不再自写“第二客户端”冒充互操作。
+- **环境探针**：新增 `npm run acp:interop:probe`，只把真实可执行的外部客户端计入 RC；当前环境仍为 0/2，因此保持 Beta。
+- **Cross-host 一致性**：系统提示词明确 VS Code、CLI/Headless、ACP Agent Server 三宿主；产品路线固定为 `0.19 Stable → Standalone Desktop UI → General HMR Runtime`。
+- **验证**：`npm run check` 8/8；`npm test` 345/345；raw ACP conformance 15/15。
+
+## v0.19.0-beta.2（M4：ACP 互操作硬化与证据框架）
+
+- **JSON-RPC 边界硬化**：显式拒绝非法 request/response id，并覆盖 parse error、invalid request 与 EOF final-frame。
+- **进程级 ACP Conformance**：新增 `npm run acp:conformance`，真实启动 FreeSeek ACP stdio Host 并验证 initialize/new/prompt/list/mode/close/resume/stdout purity 等 15 项。
+- **独立客户端证据门禁**：新增 `ACP_INTEROP_MATRIX.md` 与 `npm run acp:interop` evidence wrapper；FreeSeek 自有 raw driver 明确不计入 RC 的 2-client 门禁。
+- **可移植验证构建**：esbuild 原生二进制不可用时，ACP conformance 自动回退到 tsc verification build。
+- **当前边界**：本环境尚无可执行的独立 ACP Client 依赖，互操作计数仍为 0/2，因此本版本保持 Beta，不晋升 RC。
+- **验证**：`npm run check` 8/8；`npm test` 342/342；raw ACP conformance 15/15。
+
+## v0.19.0-beta.1（Cross-host M3：ACP Host Parity）
+
+- **ACP ask-user / Elicitation**：仅在 Client 协商 `elicitation.form` 后暴露 `ask_user`，并映射为 `elicitation/create` form；未协商时工具不暴露且 fail-closed。
+- **多 Workspace Roots**：`additionalDirectories` 进入统一路径安全层；文件读写/删除、Glob/Search/Grep、命令/Python/Code cwd、Checkpoint 与 Hooks 都按实际授权 root 解析。
+- **Resume 权限不漂移**：additional roots 规范化、去重并持久化；resume 必须重新声明相同授权集合，禁止静默扩大或替换 session 文件系统范围。
+- **Session Modes**：新增 `coder/craft/plan/ask` 模式状态与 `session/set_mode`，模式持久化并在 resume 时恢复。
+- **Skills / Multi-Agent Policy**：ACP Skills 可显式关闭；关闭时不仅隐藏 `load_skill`，也移除 ToolContext SkillManager 与子 Agent 技能继承。Multi-Agent 继续默认关闭、显式开启。
+- **结构治理**：ACP Server 拆分 session config/parser 模块，保持单文件 600 行 hygiene 硬门禁，不增加豁免。
+- **验证**：功能树在晋升前已达到 `npm run check` 8/8、`npm test` 340/340；版本晋升后重新执行完整门禁并记录于 beta.1 validation ledger。
+
+## v0.19.0-alpha.2（Cross-host M2：ACP v1 stdio Agent Server）
+
+- **第三正式 Host**：新增 ACP v1 stdio Agent Server，入口为 `freeseek acp` 与独立 `freeseek-acp`；stdout 严格保留给 NDJSON JSON-RPC，诊断写 stderr。
+- **ACP 生命周期**：实现 `initialize`、`session/new`、`session/prompt`、`session/cancel`、`session/list`、`session/resume`、`session/close`，并复用 FreeSeek durable EventLog。
+- **双向交互**：Agent 流式状态通过 `session/update` 返回；高风险工具/MCP 审批通过 `session/request_permission` 交给 ACP Client 展示，最终准入仍由 ToolRuntime 决定。
+- **会话级 MCP**：CLI/ACP 可各自持有独立 `McpManager`；ACP 支持 stdio MCP，允许 PATH-resolved command；多 ACP session 不再共享一个全局 MCP 生命周期。
+- **敏感配置最小持久化**：ACP metadata 只保存 MCP server 名称，不落盘 command/env/secret；resume 必须由客户端重新提供并校验 server 名集合。
+- **协议硬化**：标准化 unknown/busy/cursor JSON-RPC error semantics，显式 `loadSession:false`，清理 generic `$/cancel_request` 与重复 error write。
+- **验证**：`npm run check` 8/8；`npm test` 336/336；独立 `freeseek-acp` 与统一 `freeseek acp` 均通过真实子进程 NDJSON/stdout-purity + Agent turn E2E。
+
+## v0.19.0-alpha.1（Cross-host M1：CLI/Headless 能力契约与服务对齐）
+
+- **Host Capability Contract**：Kernel 只依赖宿主能力契约，VS Code/CLI/ACP/Eval profile 位于各自 `src/hosts/*`，并加入 Kernel→Host 反向依赖门禁。
+- **CLI 真实交互宿主**：新增 `--interactive` 的 ask-user 与 Runtime approval；默认非交互/CI 继续 fail-closed，`--yes` 为显式自动批准。
+- **Headless MCP / Skills**：CLI 可从 `--mcp-config` 装配 stdio/http MCP 动态工具，并加载项目级、用户级与额外 skill roots。
+- **Headless Multi-Agent**：新增显式 `--enable-multi-agent`；子 Agent 使用父 Agent 的动态 ToolRegistry schema snapshot，不丢失 MCP/Connector 能力。
+- **MCP 路由修复**：修正 `mcp__` 前缀解析 off-by-one。
+- **验证**：`npm run check` 通过；`npm test` 331/331；新增 Multi-Agent 与 MCP Headless E2E。
 
 ## v0.18.0（多宿主稳定版：Trace/Eval + Indexed Event Store + CLI/Headless）
 
@@ -303,3 +566,16 @@
 - Added experimental `contextPlanner=v1.1`, retaining the v1 index while correcting negative-intent/test/docs/example ranking.
 - Generalized `ab-context` with `--baseline-planner` / `--candidate-planner` so v1 → v1.1 can be evaluated on Public/Private/Real suites.
 - Default remains `off`; v1.1 promotion requires real-model non-regression evidence.
+
+## 0.22.0-rc.1 — Source release freeze (2026-08-22)
+
+- Freeze General HMR H0-H4 together with the completed Desktop UI convergence baseline for unified 0.22 release consolidation.
+- RC source line contains the shared Kernel plus CLI/Headless, ACP, VS Code and Desktop hosts; HMR remains one platform runtime, not a host-specific fork.
+- Full dependency-backed build/test and native artifact certification remain required before an immutable public `v0.22.0` release tag.
+
+## 0.22.0 — Local/Internal Source Stable (2026-08-22)
+
+- Freeze unified FreeSeek Core + CLI/Headless + ACP + VS Code + Desktop source with General HMR H0-H4.
+- HMR remains a platform Extension Runtime shared by all hosts; Desktop continues to use ACP rather than a second Agent implementation.
+- Add stable source deployment/use/security/support-matrix documentation under `docs/stable/0.22.0/`.
+- Public/native artifact certification and immutable `v0.22.0` tag remain pending the repository release contract; this source freeze does not fabricate those results.

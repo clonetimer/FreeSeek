@@ -10,7 +10,7 @@ import type { ToolContext } from "./tools";
 import { executeToolBody } from "./tools";
 import { getBuiltinToolRuntimeSpec, getToolRuntimeSpec, type ToolRuntimeSpec } from "./tool-runtime-spec";
 
-export type ToolSource = "builtin" | "mcp" | "connector" | "agent" | "unknown";
+export type ToolSource = "builtin" | "mcp" | "connector" | "extension" | "agent" | "unknown";
 
 export type RegisteredToolExecutor = (
   args: any,
@@ -30,6 +30,7 @@ export type ToolExecutorOverrides = Record<string, RegisteredToolExecutor | unde
 function inferSource(name: string): ToolSource {
   if (name.startsWith("mcp__") || name.startsWith("mcp_")) return "mcp";
   if (name.startsWith("conn__")) return "connector";
+  if (name.startsWith("ext__")) return "extension";
   if (["spawn_agent", "spawn_agents", "send_message"].includes(name)) return "agent";
   return "builtin";
 }
@@ -117,11 +118,24 @@ export class ToolRegistry {
    */
   static fromDefinitions(
     definitions: readonly ToolDefinition[],
-    overrides: ToolExecutorOverrides = {}
+    overrides: ToolExecutorOverrides = {},
+    explicitRegistrations: readonly ToolRegistration[] = []
   ): ToolRegistry {
     const registry = new ToolRegistry();
+    const explicit = new Map<string, ToolRegistration>();
+    for (const registration of explicitRegistrations) {
+      if (explicit.has(registration.name)) {
+        throw new Error(`ToolRegistry: 显式注册项重复：${registration.name}`);
+      }
+      explicit.set(registration.name, registration);
+    }
     for (const definition of definitions) {
       const name = assertDefinition(definition);
+      const registration = explicit.get(name);
+      if (registration) {
+        registry.register(registration);
+        continue;
+      }
       const override = overrides[name];
       const source = inferSource(name);
       const builtinRuntime = getBuiltinToolRuntimeSpec(name);
@@ -130,6 +144,9 @@ export class ToolRegistry {
       }
       if (source === "agent" && !override) {
         throw new Error(`ToolRegistry: Agent-native 工具「${name}」缺少显式 executor`);
+      }
+      if (source === "extension") {
+        throw new Error(`ToolRegistry: Extension 工具「${name}」缺少 generation-bound 显式注册项`);
       }
       registry.register({
         name,

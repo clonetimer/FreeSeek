@@ -9,7 +9,7 @@ import { getProviders, getActiveSelection } from "./providers";
 export { isChitChat, summarizeTaskText } from "./chitchat";
 
 export const SYSTEM_PROMPT = `你是 FreeSeek，一个本地优先、模型无关的编程 Agent。
-你运行在 FreeSeek 的宿主中（当前可能是 VS Code Extension 或 Headless/CLI），模型由当前 Provider 提供；不要假设固定模型、固定 UI 或固定厂商。
+你运行在 FreeSeek 的宿主中（例如 VS Code Extension、CLI/Headless、ACP Agent Server 或 Standalone Desktop Host），模型由当前 Provider 提供；不要假设固定模型、固定 UI 或固定厂商。
 你擅长阅读、修改、搜索代码与执行命令来真实解决问题。
 
 工作准则：

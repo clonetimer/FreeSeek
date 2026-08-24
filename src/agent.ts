@@ -34,9 +34,10 @@ import {
 import { subAgentRegistry, busyAgents } from "./agent-registry";
 import { runSubAgent } from "./agent-subagent";
 import { ToolRuntime } from "./tool-runtime";
-import { ToolRegistry, type ToolExecutorOverrides } from "./tool-registry";
+import type { ToolExecutorOverrides } from "./tool-registry";
 import { captureWorkspaceCheckpoint } from "./workspace-timeline";
 import { applyContextPlanner } from "./agent-context-planner";
+import { acquireExtensionRunBoundary } from "./kernel/extensions/run-boundary";
 import type { AgentCallbacks } from "./agent-types";
 export type { AgentCallbacks, SubAgentHandle } from "./agent-types";
 export { clearSubAgentRegistry } from "./agent-registry";
@@ -133,8 +134,23 @@ export async function runAgent(
   let toolCallTotal = 0;
   // 重复工具调用提醒窗口（跨轮检测：同一工具+相同参数连续出现 3 次时提醒模型更换思路）
   const repeatWindow: { name: string; key: string }[] = [];
+  const runSignal = cb.signal ?? toolCtx.signal;
+  if (runSignal) toolCtx.signal = runSignal;
+  const eventActor = toolCtx.eventActor ?? "main";
+  const event = (type: string, data?: unknown) =>
+    toolCtx.eventLog?.append(type, data, eventActor) ?? appendEvent(type, data, eventActor);
+  const persistMessage = (message: ChatMessage) =>
+    toolCtx.eventLog?.persistMessage(message) ?? messageForEventLog(message);
+  const persistConversation = (current: readonly ChatMessage[]) =>
+    toolCtx.eventLog?.persistConversation(current) ?? conversationForEventLog(current);
+  let releaseExtensionRun: (() => Promise<void>) | undefined;
+  try {
+  // General HMR：每个 Agent run 在边界获取 immutable generation lease；子 Agent retain 同一快照。
+  const extensionRun = acquireExtensionRunBoundary(toolCtx);
+  releaseExtensionRun = () => extensionRun.release();
+  const mergedTools = extensionRun.merge(tools);
   // 按 ToolContext 约束裁剪工具集：子智能体据此限定权限（白名单 + 禁止递归派发）
-  const effectiveTools = tools.filter((t) => {
+  const effectiveTools = mergedTools.filter((t) => {
     if (toolCtx.toolWhitelist && !toolCtx.toolWhitelist.includes(t.function.name)) return false;
     if (!toolCtx.canSpawn && (t.function.name === "spawn_agent" || t.function.name === "spawn_agents")) return false;
     return true;
@@ -145,22 +161,11 @@ export async function runAgent(
     maxTokens: effectiveBudget,
     maxWallClockMs: wallClockMs,
   });
-
-  const runSignal = cb.signal ?? toolCtx.signal;
-  if (runSignal) toolCtx.signal = runSignal;
-  const eventActor = toolCtx.eventActor ?? "main";
-  const event = (type: string, data?: unknown) =>
-    toolCtx.eventLog?.append(type, data, eventActor) ?? appendEvent(type, data, eventActor);
-  const persistMessage = (message: ChatMessage) =>
-    toolCtx.eventLog?.persistMessage(message) ?? messageForEventLog(message);
-  const persistConversation = (current: readonly ChatMessage[]) =>
-    toolCtx.eventLog?.persistConversation(current) ?? conversationForEventLog(current);
   const snapshot = (reason: string) => {
     const logged = persistConversation(messages);
     event("conversation/snapshot", { ...logged, reason });
   };
   const turnId = `turn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-
   /** Agent 原生工具 body：编排能力也由 ToolRuntime 包裹，只把真正执行体留在 Agent 层。 */
   const executeAgentToolBody = async (
     name: string,
@@ -240,7 +245,12 @@ export async function runAgent(
         event("send_message", { target });
         const continuedCtx: ToolContext = { ...handle.ctx, signal: bodyCtx.signal };
         const continuedCb: AgentCallbacks = { ...handle.cb, signal: bodyCtx.signal };
-        out2 = await runAgent(handle.messages, TOOL_DEFINITIONS, continuedCtx, continuedCb);
+        out2 = await runAgent(
+          handle.messages,
+          [...(handle.ctx.toolDefinitions ?? TOOL_DEFINITIONS)],
+          continuedCtx,
+          continuedCb
+        );
       } finally {
         busyAgents.delete(target);
       }
@@ -256,24 +266,27 @@ export async function runAgent(
 
     return undefined;
   };
-
   const executorOverrides: ToolExecutorOverrides = {
     spawn_agent: async (args, bodyCtx) => String((await executeAgentToolBody("spawn_agent", args, bodyCtx)) ?? ""),
     spawn_agents: async (args, bodyCtx) => String((await executeAgentToolBody("spawn_agents", args, bodyCtx)) ?? ""),
     send_message: async (args, bodyCtx) => String((await executeAgentToolBody("send_message", args, bodyCtx)) ?? ""),
   };
-  const toolRegistry = ToolRegistry.fromDefinitions(effectiveTools, executorOverrides);
+  const toolRegistry = await extensionRun.createRegistry(effectiveTools, executorOverrides);
   // Provider 看到的 schema 与 Runtime 真正可执行的注册快照必须来自同一 Registry，
   // 避免 run 中途定义数组被修改后出现“模型看得到但 Runtime 不认”或反向漂移。
   const registeredTools = toolRegistry.definitions();
+  extensionRun.mountSkills(registeredTools.map((definition) => definition.function.name));
+  // 基础 schema 与 HMR generation 分开保存；当前子 Agent retain 固定快照，下一独立 turn 可见新 generation。
+  toolCtx.toolDefinitions = extensionRun.baseDefinitions(registeredTools);
   const toolRuntime = new ToolRuntime(toolCtx, toolRegistry, {
     requestApproval: cb.onPermissionRequest,
     onTimeout: () => {},
     onStatus: (text) => cb.onContextStatus?.(text),
   });
-
   // 只有 Registry/Runtime 成功构建后才承认一个 durable turn 已开始；
   // 这样启动阶段配置错误不会留下没有 turn/end 的半截生命周期。
+  const extensionLeaseEvent = extensionRun.eventData();
+  if (extensionLeaseEvent) event("extension/lease", extensionLeaseEvent);
   event("turn/start", { turnId, messageCount: messages.length, startedAt: Date.now() });
   if (eventActor === "main") {
     try {
@@ -704,14 +717,20 @@ export async function runAgent(
     });
     throw e;
   } finally {
-    event("turn/end", {
-      turnId,
-      reason: turnReason,
-      steps,
-      endedAt: Date.now(),
-      ...(turnError ? { error: turnError.slice(0, 2000) } : {}),
-    });
+    try {
+      event("turn/end", {
+        turnId,
+        reason: turnReason,
+        steps,
+        endedAt: Date.now(),
+        ...(turnError ? { error: turnError.slice(0, 2000) } : {}),
+      });
+      if (extensionLeaseEvent) event("extension/release", extensionLeaseEvent);
+    } finally {
+      await extensionRun.release();
+    }
   }
+  } finally { await releaseExtensionRun?.(); }
 }
 
 /**

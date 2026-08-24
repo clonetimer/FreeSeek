@@ -1,0 +1,188 @@
+{
+  "project": "FreeSeek",
+  "schemaVersion": 1,
+  "stableBaseline": {
+    "version": "0.20.0",
+    "gitTag": "v0.20.0",
+    "gitCommit": "67bbe2fe0b97a347e1bb6fa26fb196b553326df7",
+    "sourceArchiveSha256": "see-external-stable-kit-SHA256SUMS.txt",
+    "status": "local-internal-stable-unsigned"
+  },
+  "activeDevelopment": {
+    "version": "0.26.0",
+    "branch": "release/0.26-source-stable",
+    "theme": "0.26.0 Local/Internal Source Stable (plugin ecosystem: freeseek plugin add/remove/list + kit themes)",
+    "status": "active",
+    "phase": "source-stable-frozen"
+  },
+  "productSurfaces": {
+    "vscode": "0.24-source-stable",
+    "cli": "0.24-source-stable",
+    "acp": "0.24-source-stable",
+    "webConsole": "0.24-local-http-sse-console",
+    "desktopApp": "0.24-source-stable-native-artifact-certification-pending",
+    "generalHmr": "0.24-source-stable-h0-h4-linux-h4"
+  },
+  "milestones": [
+    {
+      "id": "D0",
+      "name": "Desktop architecture, host contract and repository baseline",
+      "target": "0.20.0-dev.1",
+      "status": "done"
+    },
+    {
+      "id": "D1",
+      "name": "Electron shell and ACP session bridge",
+      "target": "0.20.0-alpha.1",
+      "status": "done"
+    },
+    {
+      "id": "D2",
+      "name": "Desktop session UX: history, resume, approvals, elicitation and modes",
+      "target": "0.20.0-alpha.2",
+      "status": "done"
+    },
+    {
+      "id": "D3",
+      "name": "Desktop feature parity: settings, MCP, skills, multi-agent and artifact views",
+      "target": "0.20.0-beta.1",
+      "status": "done"
+    },
+    {
+      "id": "D4",
+      "name": "Desktop packaging, secure secrets, updater and cross-platform hardening",
+      "target": "0.20.0-rc.1",
+      "status": "done"
+    },
+    {
+      "id": "D5",
+      "name": "0.20 standalone desktop stable promotion",
+      "target": "0.20.0",
+      "status": "done"
+    },
+    {
+      "id": "U0",
+      "name": "Desktop presentation contract: ACP session updates to typed renderer semantics",
+      "target": "0.21.0-dev.1",
+      "status": "done"
+    },
+    {
+      "id": "U1",
+      "name": "Desktop three-pane shell and trajectory/details workspace",
+      "target": "0.21.0-dev.1",
+      "status": "done"
+    },
+    {
+      "id": "U2",
+      "name": "Typed output and specialized tool cards",
+      "target": "0.21.0-dev.2",
+      "status": "done"
+    },
+    {
+      "id": "U3",
+      "name": "Trajectory inspector with richer turn/tool lifecycle projection",
+      "target": "0.21.0-dev.3",
+      "status": "done"
+    },
+    {
+      "id": "U4",
+      "name": "Evidence-backed file changes, diffs and deliverables",
+      "target": "0.21.0-alpha.1",
+      "status": "done"
+    },
+    {
+      "id": "U5",
+      "name": "Large-session performance, accessibility and interaction polish",
+      "target": "0.21.0-beta.1",
+      "status": "done"
+    },
+    {
+      "id": "R0",
+      "name": "0.21 Desktop UI local/internal Stable consolidation",
+      "target": "0.21.0",
+      "status": "rc-native-validation-pending"
+    },
+    {
+      "id": "H0",
+      "name": "Extension lifecycle, generation leases, reversible effects and turn-boundary atomic registry snapshot",
+      "target": "0.22.0-dev.1",
+      "status": "done"
+    },
+    {
+      "id": "H1",
+      "name": "Trusted CommonJS package loader, filesystem polling HMR and explicit ACP/CLI host mount",
+      "target": "0.22.0-dev.1",
+      "status": "done"
+    },
+    {
+      "id": "H2",
+      "name": "Skill roots/assets, Hook/policy and MCP contribution adapters",
+      "target": "0.22.0-dev.2",
+      "status": "done"
+    },
+    {
+      "id": "H3",
+      "name": "Cross-host extension management, durable audit/status and operator UX",
+      "target": "0.22.0-dev.3",
+      "status": "done"
+    },
+    {
+      "id": "H4",
+      "name": "Untrusted/model-generated extension out-of-process sandbox",
+      "target": "0.22.0-dev.4",
+      "status": "done"
+    },
+    {
+      "id": "P0",
+      "name": "Plugin ecosystem: freeseek plugin add/remove/list (npm/git/file) + kit themes/skins",
+      "target": "0.26.0",
+      "status": "done"
+    }
+  ],
+  "lastValidation": {
+    "date": "2026-08-22",
+    "version": "0.22.0",
+    "status": "local-internal-source-stable-frozen",
+    "passed": [
+      "0.22.0 source metadata synchronized across root package, lockfile and Desktop package",
+      "H0-H4 feature code unchanged from validated dev.4 exact checkpoint",
+      "repository structural gates 3-7/8 pass after source-stable promotion",
+      "stable deployment/use/security documentation added for Core, CLI, ACP, VS Code, Desktop and General HMR"
+    ],
+    "deferred": [
+      "official immutable v0.22.0 tag and public/native binary Stable promotion await dependency-backed and platform artifact evidence"
+    ]
+  },
+  "post019Priorities": [
+    "standalone-desktop-ui",
+    "general-hmr-extension-runtime"
+  ],
+  "post020Priorities": [
+    "general-hmr-extension-runtime",
+    "0.21-rc-native-stable-finalization"
+  ],
+  "releaseCandidates": [
+    {
+      "version": "0.21.0-rc.1",
+      "branch": "dev/0.21-ui",
+      "gitCommit": "84d14cd68a07bb0b20dc5cd046157f7feed0cab5",
+      "status": "native-validation-pending",
+      "scope": "Desktop UI Experience Convergence U0-U5; frozen candidate, no HMR changes"
+    },
+    {
+      "version": "0.22.0-rc.1",
+      "branch": "release/0.22-source-stable",
+      "gitCommit": "b7997b76d01944cabec07ddf76c6a5c70d7724d2",
+      "status": "source-rc-frozen-artifact-certification-pending",
+      "scope": "FreeSeek 0.22 unified Core/CLI/ACP/VS Code/Desktop + General HMR H0-H4 source release candidate; no v0.22.0 tag yet"
+    }
+  ],
+  "sourceStableBaseline": {
+    "version": "0.22.0",
+    "branch": "release/0.22-source-stable",
+    "status": "local-internal-source-stable-artifact-certification-pending",
+    "directRcVersion": "0.22.0-rc.1",
+    "directRcCommit": "b7997b76d01944cabec07ddf76c6a5c70d7724d2",
+    "publicGitTagCreated": false
+  }
+}

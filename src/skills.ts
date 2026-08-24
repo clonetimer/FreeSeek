@@ -43,7 +43,9 @@ export interface SkillEntry {
   /** 分类（如 workflow / security / review / refactor / explore），用于 marketplace 归类。 */
   category?: string;
   /** 来源（builtin=随扩展内置 / user=用户目录 / remote=远程安装）。 */
-  source?: "builtin" | "user" | "remote";
+  source?: "builtin" | "user" | "remote" | "extension";
+  /** Generation-owned Extension Runtime skills are immutable snapshots for one Agent run. */
+  readonly?: boolean;
   /**
    * 所需工具声明（对齐 Cordis 论文 6.3 capability：依赖声明即能力请求，
    * 加载时审查而非运行时发现）。frontmatter 可写 `tools: list_directory, read_file`。
@@ -135,6 +137,52 @@ export class SkillManager {
     }
   }
 
+  /** Compose generation-owned skill snapshots without rescanning mutable extension package paths. */
+  withExtensionAssets(
+    assets: readonly { name: string; markdown: string; source?: string }[],
+    availableTools?: readonly string[]
+  ): SkillManager {
+    if (!assets.length) return this;
+    const clone = Object.create(SkillManager.prototype) as SkillManager;
+    clone.skills = this.skills.map((skill) => ({ ...skill, triggers: [...skill.triggers], path_binding: [...skill.path_binding], requires: [...(skill.requires ?? [])], ...(skill.tools ? { tools: [...skill.tools] } : {}) }));
+    clone.availableTools = availableTools?.length ? new Set(availableTools) : this.availableTools ? new Set(this.availableTools) : null;
+    const existing = new Set(clone.skills.map((skill) => skill.name));
+    for (const asset of assets) {
+      const name = String(asset.name ?? "").trim();
+      if (!name) throw new Error("Extension Runtime skill name 不能为空");
+      const markdown = String(asset.markdown ?? "");
+      const prior = clone.skills.find((skill) => skill.name === name);
+      if (prior) {
+        if (prior.readonly && prior.source === "extension" && prior.content === markdown) continue;
+        throw new Error(`Extension Runtime skill 与现有技能重名：${name}`);
+      }
+      const parsed = parseFrontmatter(markdown);
+      const fm = parsed.fm;
+      clone.skills.push({
+        name,
+        description: typeof fm.description === "string" ? fm.description : `Extension Runtime skill from ${asset.source ?? "extension"}`,
+        triggers: Array.isArray(fm.triggers) ? fm.triggers.map(String) : [],
+        path_binding: Array.isArray(fm.path_binding) ? fm.path_binding.map(String) : ["**"],
+        file: "",
+        status: fm.status === "pending" ? "pending" : "active",
+        content: markdown,
+        readonly: true,
+        requires: typeof fm.requires === "string"
+          ? fm.requires.split(",").map((x) => x.trim()).filter(Boolean)
+          : Array.isArray(fm.requires) ? fm.requires.map(String) : [],
+        tools: typeof fm.tools === "string"
+          ? fm.tools.split(",").map((x) => x.trim()).filter(Boolean)
+          : Array.isArray(fm.tools) ? fm.tools.map(String) : undefined,
+        version: typeof fm.version === "string" ? fm.version : undefined,
+        author: typeof fm.author === "string" ? fm.author : undefined,
+        category: typeof fm.category === "string" ? fm.category : undefined,
+        source: "extension",
+      });
+      existing.add(name);
+    }
+    return clone;
+  }
+
   hasSkills(): boolean {
     return this.skills.length > 0;
   }
@@ -184,7 +232,7 @@ export class SkillManager {
     const parts: string[] = [];
     for (const n of order) {
       const dep = this.skills.find((x) => x.name === n)!;
-      const body = dep.builtin ? dep.content ?? "" : fs.readFileSync(dep.file, "utf8");
+      const body = dep.content !== undefined ? dep.content : fs.readFileSync(dep.file, "utf8");
       parts.push(n === name ? body : `## 依赖技能：${n}\n${body}`);
     }
     if (missing.length) {
@@ -224,8 +272,8 @@ export class SkillManager {
   setStatus(name: string, status: "active" | "pending"): { ok: boolean; message: string } {
     const s = this.skills.find((x) => x.name === name);
     if (!s) return { ok: false, message: `未找到技能: ${name}` };
-    if (s.builtin) {
-      return { ok: false, message: `内置技能 ${name} 为只读模板，不可修改状态。如需定制，请复制其内容到你的技能目录后修改。` };
+    if (s.builtin || s.readonly) {
+      return { ok: false, message: `${s.builtin ? "内置" : "Extension Runtime"} 技能 ${name} 为只读快照，不可修改状态。` };
     }
     try {
       const content = fs.readFileSync(s.file, "utf8");
@@ -250,7 +298,7 @@ export class SkillManager {
   delete(name: string): { ok: boolean; message: string } {
     const s = this.skills.find((x) => x.name === name);
     if (!s) return { ok: false, message: `未找到技能: ${name}` };
-    if (s.builtin) return { ok: false, message: `内置技能 ${name} 为只读模板，不可删除。` };
+    if (s.builtin || s.readonly) return { ok: false, message: `${s.builtin ? "内置" : "Extension Runtime"} 技能 ${name} 为只读快照，不可删除。` };
     try {
       fs.rmSync(path.dirname(s.file), { recursive: true, force: true });
       this.skills = this.skills.filter((x) => x.name !== name);

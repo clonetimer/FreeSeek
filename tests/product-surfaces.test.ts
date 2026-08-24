@@ -6,7 +6,7 @@ import { SYSTEM_PROMPT } from "../src/prompts";
 
 test("FreeSeek core persona 不把 Kernel 写死为 VS Code 或 DeepSeek", () => {
   assert.match(SYSTEM_PROMPT, /FreeSeek/);
-  assert.match(SYSTEM_PROMPT, /VS Code Extension 或 Headless\/CLI/);
+  assert.match(SYSTEM_PROMPT, /VS Code Extension、CLI\/Headless、ACP Agent Server 或 Standalone Desktop Host/);
   assert.doesNotMatch(SYSTEM_PROMPT, /嵌入在 VS Code/);
   assert.doesNotMatch(SYSTEM_PROMPT, /由 DeepSeek 驱动/);
 });

@@ -107,8 +107,14 @@ export async function runSubAgent(
     if (!whitelist && modePreset) whitelist = modePreset.tools;
   }
 
-  // 工具集交集：角色声明 ∩ 父 Agent 拥有（父未暴露的不可用），并显式禁止子 Agent 再派发
-  const parentTools = parentCtx.toolWhitelist ?? TOOL_DEFINITIONS.map((t) => t.function.name);
+  // 工具集交集：角色声明 ∩ 父 Agent 拥有（父未暴露的不可用），并显式禁止子 Agent 再派发。
+  // HMR contribution 不写回基础 toolDefinitions；当前父 turn 的 generation 由 lease 单独固定。
+  const parentDefinitions = parentCtx.toolDefinitions ?? TOOL_DEFINITIONS;
+  const extensionDefinitions = parentCtx.extensionLease?.toolDefinitions() ?? [];
+  const parentTools = parentCtx.toolWhitelist ?? [
+    ...parentDefinitions.map((t) => t.function.name),
+    ...extensionDefinitions.map((t) => t.function.name),
+  ];
   const effectiveWhitelist = deriveSubagentPermissions(parentTools, whitelist ?? []);
 
   // 执行/只读模式判定：显式 mode 优先；否则按角色白名单推断——含 shell/验证类工具的角色
@@ -134,6 +140,10 @@ export async function runSubAgent(
     todoState: { items: [] },
     goalState: emptyGoalState(), // 子智能体独立目标上下文（不继承主 Agent 目标）
     canSpawn: false, // 防递归
+    toolDefinitions: parentDefinitions,
+    extensionRuntime: parentCtx.extensionRuntime,
+    // 子 Agent 自己拥有一份 retained lease；即使后台任务跨过父 turn 结束，也不会执行到新 generation。
+    extensionLease: parentCtx.extensionLease?.retain(),
     toolWhitelist: effectiveWhitelist,
     userMemoryPath: parentCtx.userMemoryPath,
     planMode: parentCtx.planMode, // 继承主 Agent 的规划/沙箱约束
@@ -202,7 +212,7 @@ export async function runSubAgent(
 
   const subLabel = agentName || roleKey || mode;
   try {
-    const out = await runAgent(subMessages, TOOL_DEFINITIONS, subCtx, subCb);
+    const out = await runAgent(subMessages, [...parentDefinitions], subCtx, subCb);
     // 取最后一条 assistant 消息作为结论报告
     let report = "（子智能体未返回结论）";
     for (let i = out.length - 1; i >= 0; i--) {

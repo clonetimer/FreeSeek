@@ -1,17 +1,59 @@
 # FreeSeek — 本地优先、模型无关的 Coding Agent
 
-FreeSeek 是一个**宿主无关的 Agent Kernel**：同一套 `ToolRegistry → ToolRuntime → EventLog` 同时服务 VS Code、Headless/CLI、Eval/Bench。当前提供两个正式宿主：**VS Code Extension** 负责编辑器内交互，**CLI/Headless** 负责终端、CI、Bench 与自动化；两者共享同一 Kernel 与安全边界。未来 Agent Server/ACP 用于跨 IDE 复用，Web 只规划为远程任务/Trace/Bench/Sandbox 控制台，而不是另造浏览器 IDE。
+FreeSeek 是一个**宿主无关的 Agent Kernel**。VS Code、CLI/Headless、ACP 与 Standalone Desktop 复用同一 `ToolRegistry → ToolRuntime → EventLog`；当前 `0.26.0 (Stable)` 主线在 0.25.0 之上新增**插件加装与套件皮肤**（plugin ecosystem，见下），0.25.0 已在 0.24.0 之上补齐相对 codex / deepseek-harness 的 5 项可见缺口，仍不复制 Agent/Kernel。
 
-- **FreeSeek for VS Code（主入口）**：编辑器原生 selection/diff/LSP/审批与会话 UI。
-- **FreeSeek CLI / Headless（正式第二入口）**：`run/eval/bench/doctor/sessions/replay` 覆盖脚本、CI、回放、Bench 与后台/远程任务，复用同一 Agent Kernel。
+- **FreeSeek for VS Code（Stable）**：编辑器原生 selection/diff/LSP/审批与会话 UI。
+- **FreeSeek CLI / Headless（Stable）**：终端、CI、Bench、自动化与 durable session。
+- **FreeSeek ACP Agent Server（Stable）**：标准 ACP v1 stdio 协议宿主，已经过独立客户端互操作门禁。
+- **FreeSeek Desktop（0.21 RC1 UI 已冻结）**：Electron Shell → ACP → shared Kernel；renderer 无 Node/ToolRuntime 权限，Stable promotion 仍等待原生 Windows 证据。
 - **Provider-agnostic**：支持 OpenAI-compatible / DeepSeek / Claude / Gemini 等 Provider；模型身份不写死在 Kernel。
 - **Local-first / auditable**：权限、sandbox、checkpoint、EventLog、trace/eval/bench 都在本地可审计。
-- **Context Planner v1/v1.1/v1.2（实验）**：v1.1 修正 negative-intent/ranking；v1.2 保持 v1.1 检索顺序，只改成结构化 evidence + tool discipline，用于单独验证 Context Presentation / Tool Selection。默认仍为 `off`；先跑 `context-retrieval`，再用 `ab-context` 做真实模型 A/B。
-- **DeepSeek V4 官方 API**：官方 Provider 默认使用 `https://api.deepseek.com` + `deepseek-v4-flash` / `deepseek-v4-pro`；真实 Context A/B 可用 `DEEPSEEK_API_KEY=... npm run bench:deepseek-context`，密钥不会写入 argv 或报告。
+- **General HMR Runtime（0.22 完成，0.23 保持）**：generation lease + reversible lifecycle + trusted Tool/Connector package HMR；只在 Agent run boundary 原子切换，不修改运行中的 ToolRegistry。
 
 `deepseek-free-api` 网页兼容适配仍可作为**实验性、显式启用的 Provider**使用，但不再定义 FreeSeek 的产品身份；核心架构与其他 Provider 解耦。
 
 架构与交互形态详见 [docs/product-surfaces.md](docs/product-surfaces.md)，Context Planner 详见 [docs/context-planner.md](docs/context-planner.md)。
+
+## 0.25.0 Stable — 补齐的 5 项缺口
+
+相对 codex / deepseek-harness 的差距清单，0.25.0 全部落地：
+
+| # | 缺口 | 0.25.0 实现 | 关键入口 |
+| --- | --- | --- | --- |
+| 1 | 交互式终端（TUI） | 全交互会话视图：实时流式渲染 + 工具进度 + 键盘审批（`y/N`/Enter） | `node dist/freeseek-headless.js --tui`；`src/tui.ts` |
+| 2 | 声明式命令策略语言 | 对标 codex execpolicy 的 DSL：`default` + 规则集（按 cmd/正则/effect/os/network 判定 allow/deny/ask/sandbox/readonly 五档） | `src/sandbox.ts`（`compileExecPolicy`）；`--exec-policy policy.json` |
+| 3 | 远程/云沙箱 provider | 三种可落地 transport：本地 Docker（`docker exec`）、SSH 远端、E2B 云沙箱，经 `seam.setCommandRunner` 注入 | `src/remote-sandbox.ts`；`--sandbox remote:docker@<c>` / `remote:ssh@<host>` / `remote:e2b@<id>` |
+| 4 | 浏览器端审批与 ask_user 表单 | Web Console 把审批/表单经 SSE 推到浏览器，浏览器弹窗 + 结构化表单回传 | `src/hosts/web/console.ts`、`ui.ts`；`freeseek-web --experimental` |
+| 5 | 官方 SDK（TS） | 稳定再导出 `runAgent / ToolRegistry / ToolRuntime / sandboxes / policy / acp`，含 `freeseek-sdk` CLI | `src/sdk.ts`、`src/sdk-cli.ts`；`require("freeseek")` / `import "freeseek"` |
+
+**声明式策略示例**（`policy.json`）：
+
+```json
+{
+  "version": 1,
+  "default": "ask",
+  "rules": [
+    { "when": { "effect": ["destructive"] }, "tier": "deny", "reason": "禁止破坏性命令" },
+    { "when": { "cmd": "git status" }, "tier": "allow" },
+    { "when": { "regex": "^npm (i|install)$" }, "tier": "sandbox", "reason": "依赖安装强制沙箱" },
+    { "when": { "network": ["off"], "effect": ["net"] }, "tier": "deny", "reason": "离线环境禁止联网" }
+  ]
+}
+```
+
+运行：`node dist/freeseek-headless.js --prompt "..." --exec-policy policy.json`。
+
+## 0.26.0 Stable — Plugin Ecosystem（插件加装与套件皮肤）
+
+在 0.25.0 的 5 项缺口之上，补齐"插件加装"产品形态（对标 `dsh plugin add <spec>` / codex `codex plugin`），并让套件具备可注入的 UI 皮肤：
+
+- **插件加装 CLI**：`freeseek plugin add <spec> [--root <dir>]` / `remove <name>` / `list [--json]`。spec 支持三种来源：
+  - `npm:`（裸 `@scope/pkg@ver` 默认按 npm registry）→ `npm pack` + tar 解包（专用缓存目录，用完即删）；
+  - `git:`（含 `github:user/repo` 短路径）→ `git clone --depth 1`；
+  - `file:` / 绝对路径 → 本地目录直取。
+- **套件定位与可逆安装**：下载包内按 `plugin.json`（或 `package.json` 的 `freesek.plugin` 段）定位套件根（对齐 dsh.bundle 语义）；落地复用 kits 的 `installKit` / `uninstallKit`，把 skills / commands / agents / themes 安装到项目 `.agent/` 并登记 `.agent/kits.json` 注册表，卸载依注册表逆操作，构成可逆闭环。
+- **套件皮肤（Themes）**：套件可声明 `themes`（CSS 变量覆盖），安装后落到 `.agent/themes/<name>.css`；Web Console / VS Code 设置面板的主题下拉动态包含已安装皮肤（`body[data-theme]` 注入，在默认 5 主题之上扩展）。
+- 入口：`src/plugin.ts` + `src/plugin-cli.ts`；`src/kits.ts`（themes 类型）；`node dist/freeseek-headless.js plugin --help`。
 
 ## 快速开始（免费方案）
 
@@ -29,7 +71,7 @@ FreeSeek 是一个**宿主无关的 Agent Kernel**：同一套 `ToolRegistry →
 | --- | --- | --- |
 | VS Code Marketplace | 扩展市场搜索 FreeSeek 安装（发布后） | 普通用户 |
 | VSIX 手动安装 | `code --install-extension releases/freeseek-copilot-<版本>.vsix` 或扩展面板「从 VSIX 安装…」 | 未发布市场时的分发 |
-| CLI / npm tarball | `npm install -g ./freeseek-copilot-0.18.0.tgz` 后运行 `freeseek help` | 终端 / CI / 自动化 |
+| CLI / npm tarball | `npm install -g ./freeseek-copilot-0.19.0.tgz` 后运行 `freeseek help` | 终端 / CI / 自动化 |
 | 源码运行 | `npm install && npm run compile`；VS Code 按 F5，CLI 用 `node dist/freeseek-headless.js help` | 二次开发 / 内测 |
 
 ## 文档
@@ -42,8 +84,13 @@ FreeSeek 是一个**宿主无关的 Agent Kernel**：同一套 `ToolRegistry →
 | [docs/commands.md](docs/commands.md) | 命令面板命令一览 |
 | [docs/settings.md](docs/settings.md) | 设置项速查表 |
 | [docs/architecture.md](docs/architecture.md) | 架构与源码模块职责 |
-| [docs/product-surfaces.md](docs/product-surfaces.md) | 产品交互形态：VS Code、CLI/Headless、Agent Server 与 Web Console 边界 |
-| [docs/cli.md](docs/cli.md) | 统一 CLI：run/eval/bench/doctor/sessions/replay、安全默认值与 durable session |
+| [docs/product-surfaces.md](docs/product-surfaces.md) | 产品交互形态：VS Code、CLI/Headless、ACP、Desktop 与 Web Console 边界 |
+| [docs/project/DESKTOP_ARCHITECTURE.md](docs/project/DESKTOP_ARCHITECTURE.md) | 0.20 Desktop Host 架构与安全边界 |
+| [docs/cli.md](docs/cli.md) | 统一 CLI：run/eval/bench/acp/web/doctor/sessions/replay、安全默认值与 durable session；0.25 新增 `--tui` / `--exec-policy` / `--sandbox remote:*` 与 `freeseek-sdk` |
+| [docs/acp.md](docs/acp.md) | ACP v1 stdio Agent Server：启动、生命周期、权限、MCP、持久化与当前边界 |
+| [docs/web-console.md](docs/web-console.md) | Web Console：本地回环 HTTP/SSE 浏览器宿主（0.24；0.25 起支持浏览器端审批 / ask_user 回传） |
+| [docs/sdk.md](docs/sdk.md) | 官方 SDK（0.25）：库入口 `require("freeseek")` 导出映射与 `freeseek-sdk` CLI 用法 |
+| [docs/deployment/](docs/deployment/) | 各产品形态部署与使用说明：CLI / ACP / VS Code / Desktop / Web Console / Eval-Bench / Core |
 | [docs/context-planner.md](docs/context-planner.md) | Context Planner v1/v1.1/v1.2、retrieval/presentation experiment、模型 A/B、Context 使用 trace |
 | [docs/deepseek-v4-ab.md](docs/deepseek-v4-ab.md) | DeepSeek V4 官方 API 的安全 Context Planner 真实 A/B 运行手册 |
 | [docs/persistence-headless.md](docs/persistence-headless.md) | EventLog / 内容寻址存储 / workspace timeline / Headless 与 fork |
@@ -51,7 +98,7 @@ FreeSeek 是一个**宿主无关的 Agent Kernel**：同一套 `ToolRegistry →
 | [docs/benchmarks.md](docs/benchmarks.md) | FreeSeek Bench：公开回归、评分与 baseline 对比 |
 | [docs/bench-v2-holdout-real.md](docs/bench-v2-holdout-real.md) | Bench v2：private holdout、immutable Git source 与真实仓库任务 |
 | [docs/event-index.md](docs/event-index.md) | EventLog byte-offset 二级索引与崩溃重建语义 |
-| [docs/remote-sandbox.md](docs/remote-sandbox.md) | Remote Sandbox CommandRunner provider 与 workspace mapping 协议 |
+| [docs/remote-sandbox.md](docs/remote-sandbox.md) | Remote Sandbox CommandRunner provider 与 workspace mapping 协议（0.25 落地 Docker / SSH / E2B 三态 transport） |
 | [docs/tool-catalog.md](docs/tool-catalog.md) | 内置工具目录（由 `scripts/gen-catalog.mjs` 自动生成） |
 | [SECURITY.md](SECURITY.md) | 安全模型：沙箱 / 权限 / 内容扫描 / 漏洞报告 |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 贡献指南：门禁 / 测试 / 模块拆分契约 / 发布流程 |
@@ -77,9 +124,37 @@ node dist/freeseek-headless.js help
 freeseek doctor
 freeseek run --workspace . --prompt "检查并修复测试失败" ...
 freeseek sessions
+freeseek plugin add @scope/plugin@latest   # 插件（npm / git / 本地目录），对标 dsh plugin
+freeseek plugin remove <name>              # 可逆卸载
+freeseek plugin list                       # 列出已安装插件
 ```
 
 CLI 默认不允许 shell；需要自动批准写入/高风险能力时显式使用 `--yes`，命令/代码执行还需额外 `--allow-shell`。恢复、历史分叉和 EventLog 回放见 [docs/cli.md](docs/cli.md) 与 [docs/persistence-headless.md](docs/persistence-headless.md)。
+
+### ACP Agent Server（0.19 Stable，第三宿主）
+
+```bash
+export FREESEEK_BASE_URL=https://api.deepseek.com
+export FREESEEK_API_KEY=...
+export FREESEEK_MODEL=deepseek-v4-flash
+freeseek acp
+# 或独立 bin：freeseek-acp
+```
+
+ACP Host 使用 NDJSON JSON-RPC over stdio，stdout 只承载协议；当前实现 `initialize/new/prompt/cancel/list/resume/close`、`session/update`、client permission 与 session-owned stdio MCP。详细能力与显式未支持项见 [docs/acp.md](docs/acp.md)。
+
+### Standalone Desktop（0.20 开发主线）
+
+0.20 dev.1 首个骨架采用 Electron，但 Agent 仍运行在独立 `freeseek-acp` 子进程中。
+
+```bash
+npm run vscode:prepublish        # 先生成 dist/freeseek-acp.js
+npm run desktop:build
+npm --prefix apps/desktop install
+npm --prefix apps/desktop start
+```
+
+当前 dev.1 支持 workspace/provider 启动、流式 prompt、mode/cancel、permission/elicitation 桥；API Key 仅保存在进程内存，不持久化。详见 [Desktop Architecture](docs/project/DESKTOP_ARCHITECTURE.md)。
 
 ### Eval Harness
 

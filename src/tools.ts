@@ -4,14 +4,15 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { ToolDefinition } from "./provider";
 import type { SessionEventSink } from "./eventlog";
+import type { ExtensionLease, ExtensionRuntime } from "./kernel/extensions/runtime";
 import { decodeBuffer, encodeBuffer, isNonUtf8 } from "./encoding";
 import { ModelOverride } from "./providers";
 import { SkillManager } from "./skills";
 import { rememberFact } from "./memory";
 import { runLsp, LspAction } from "./lsp";
-import { mcpManager } from "./mcp";
+import { mcpManager, type McpManager } from "./mcp";
 import { connectorToolDefinitions, dispatchConnectorTool } from "./connectors";
-import { SandboxMode, SandboxNetworkConfig, execPolicyFromContext, commandExecPlan } from "./sandbox";
+import { SandboxMode, SandboxNetworkConfig, execPolicyFromContext, commandExecPlan, compileExecPolicy, applyPolicyDecision, detectCommandEffect, type ExecPolicyDocument } from "./sandbox";
 import { getCommandRunner } from "./seam";
 import { snapshotGitStatus, detectWorkspaceChanges } from "./wsdiff";
 import { addWorktree, removeWorktree, listWorktrees, isGitRepo } from "./worktree";
@@ -23,7 +24,16 @@ import { listCheckpoints, restoreCheckpoint } from "./checkpoints";
 import { captureWorkspaceCheckpoint } from "./workspace-timeline";
 // ── tools/ 子模块（按工具族拆分；tools.ts 仅保留分发骨架与文件快照/目标逻辑）──
 import { TOOL_DEFINITIONS } from "./tools/defs";
-import { resolveSafe, trashPath, unifiedDiff, walkMatch, grepWalk, escapeRegExp } from "./tools/fs_utils";
+import {
+  resolveSafe,
+  resolveSafeInRoots,
+  canonicalWorkspaceRoots,
+  trashPath,
+  unifiedDiff,
+  walkMatch,
+  grepWalk,
+  escapeRegExp,
+} from "./tools/fs_utils";
 import { runWebSearch, runWebFetch } from "./tools/web";
 import { runVerification } from "./tools/verify";
 import { runPython, runCode } from "./tools/exec_code";
@@ -68,6 +78,8 @@ export interface AskRequest {
 
 export interface ToolContext {
   workspaceRoot: string;
+  /** Additional absolute workspace roots explicitly authorized by the current host/session. */
+  additionalWorkspaceRoots?: string[];
   /** Agent/工具的宿主无关运行参数。VS Code 由扩展层注入，Headless 可直接提供。 */
   runtime?: {
     maxSteps?: number;
@@ -92,7 +104,7 @@ export interface ToolContext {
   /** 技能自动激活（验证门控）：模型用 pending 技能完成任务并通过 verify 后，调用其激活。 */
   promoteSkill?: (name: string) => string;
   /** MCP 工具审批（对齐 CodeBuddy MCP 工具独立审批）：外部 MCP 工具首次调用时询问 allow/allow-once/deny。 */
-  requestMCPApproval?: (toolName: string, description: string) => Promise<"allow" | "once" | "">;
+  requestMCPApproval?: (toolName: string, description: string, callId?: string) => Promise<"allow" | "once" | "">;
   /**
    * 指令执行前确认（指令审核）：Agent 调用 slash_command 执行自定义 .md 命令前，
    * 弹窗让用户审核（命令可能含危险操作）。返回 true 才执行。
@@ -103,6 +115,14 @@ export interface ToolContext {
   todoState: TodoState;
   /** 目标状态机（goal）：跟踪当前目标 + 阶段 + 轮次预算，跨压缩/跨会话持久。未提供时按空目标处理。 */
   goalState?: GoalState;
+  /** 当前 Agent run 的基础工具 schema 快照（不含 HMR generation contributions）。 */
+  toolDefinitions?: readonly ToolDefinition[];
+  /** General Extension Runtime；只有新 Agent run 才能 acquire 当前 active generation。 */
+  extensionRuntime?: ExtensionRuntime;
+  /** 当前 run 拥有的 generation lease；子 Agent 通过 retain() 继承同一不可变 generation。 */
+  extensionLease?: ExtensionLease;
+  /** 当前宿主/session 独享的 MCP manager。未提供时兼容 VS Code 全局 manager。 */
+  mcpManager?: McpManager;
   /** 是否允许派发子智能体（主 Agent=true，子 Agent 默认 false 防递归） */
   canSpawn?: boolean;
   /** 工具白名单：若存在，则只暴露这些工具（子智能体据此限定权限） */
@@ -132,6 +152,9 @@ export interface ToolContext {
   allowRules?: string[];
   /** 权限拒绝规则（deny，正则数组），同上 */
   denyRules?: string[];
+  /** 缺口2：声明式执行策略文档（ExecPolicy DSL）。提供时优先于 allowRules/denyRules 正则策略，
+   * 支持按 cmd/正则/effect/os/network 组合判定 allow/deny/ask/sandbox/readonly 五档。 */
+  execPolicyDocument?: ExecPolicyDocument;
   /** 是否允许 hookify 命令规则执行外部命令（默认 false，安全闸门） */
   allowCommandHooks?: boolean;
   /** 大结果卸载目录（globalStorage），工具输出超阈值时落盘只留引用 */
@@ -162,10 +185,10 @@ export interface ToolContext {
     original: string;
     /** 编辑后文件内容 */
     applied: string;
-  }) => void;
+  }, callId?: string) => void;
   /** 文件读取痕迹：read_file 成功读取后回传（展示路径 + 绝对路径），供前端「文件列表」面板
    * 实时展示本次回合涉及的文件。可选（子智能体未接线则不推送）。 */
-  onFileRead?: (file: string, path: string) => void;
+  onFileRead?: (file: string, path: string, callId?: string) => void;
   /** run_python 生成的图表（matplotlib 等保存的 PNG）：把 base64 data URL 回传前端渲染进聊天。
    * 可选（子智能体未接线则不推送）。 */
   onPythonCharts?: (charts: Array<{ path: string; dataUrl: string; caption: string }>) => void;
@@ -234,13 +257,21 @@ function checkConflict(fp: string): { changed: boolean; info?: FileFingerprint }
  * 绝不调用用户仓库的 git stash / git reset，因此不会把用户或前序 Agent 改动从工作树移走。
  * 失败静默跳过，绝不阻断编辑。
  */
-function autoCheckpoint(ctx: ToolContext): void {
+function autoCheckpoint(ctx: ToolContext, workspaceRoot = ctx.workspaceRoot): void {
   try {
     const label = `freesek-auto-cp:${Date.now().toString(36)}`;
-    captureWorkspaceCheckpoint(ctx, label, "auto", true);
+    captureWorkspaceCheckpoint({ ...ctx, workspaceRoot }, label, "auto", true);
   } catch {
     /* git 不可用 / 存储不可写时静默跳过；永不改变用户工作树 */
   }
+}
+
+function resolveToolPath(ctx: ToolContext, raw: string): { path: string; root: string } {
+  return resolveSafeInRoots(ctx.workspaceRoot, ctx.additionalWorkspaceRoots, raw);
+}
+
+function authorizedRoots(ctx: ToolContext): string[] {
+  return canonicalWorkspaceRoots(ctx.workspaceRoot, ctx.additionalWorkspaceRoots);
 }
 
 export async function executeToolBody(
@@ -248,12 +279,13 @@ export async function executeToolBody(
   args: any,
   ctx: ToolContext
 ): Promise<string> {
+  const activeMcpManager = ctx.mcpManager ?? mcpManager;
   try {
     // 安全策略（mode / permission / hooks / timeout / MCP approval）由 ToolRuntime 统一处理。
     // 本函数只实现工具 body；禁止 Agent/扩展层直接调用（见 scripts/check.mjs runtime 边界检查）。
     switch (name) {
       case "read_file": {
-        const fp = resolveSafe(ctx.workspaceRoot, String(args.path));
+        const { path: fp } = resolveToolPath(ctx, String(args.path));
         // 防御性上限：先 stat 拿到大小，避免把超大文件（GB 级媒体/数据库/日志）整读进内存导致 OOM。
         let size = 0;
         try { size = fs.statSync(fp).size; } catch { /* 后续 readFileSync 会报错 */ }
@@ -287,8 +319,8 @@ export async function executeToolBody(
           slice.map((l, i) => `${offset + i + 1}\t${l}`).join("\n");
       }
       case "write_file": {
-        autoCheckpoint(ctx);
-        const fp = resolveSafe(ctx.workspaceRoot, String(args.path));
+        const { path: fp, root: fileRoot } = resolveToolPath(ctx, String(args.path));
+        autoCheckpoint(ctx, fileRoot);
         const newContent = String(args.content ?? "");
         // 冲突检测：若该文件本会话曾读/写过，且磁盘已被外部改动，则拒绝覆盖（除非 force）
         if (!args.force) {
@@ -324,7 +356,8 @@ export async function executeToolBody(
         // 推送修改痕迹（unified diff），供前端渲染 + 接受/回滚；无实际差异时跳过
         if (ctx.onFileDiff) {
           const d = unifiedDiff(oldContent, newContent);
-          if (d.added > 0 || d.removed > 0) {
+          // Creating a file is itself evidence even when the new file is empty.
+          if (d.added > 0 || d.removed > 0 || !existed) {
             ctx.onFileDiff({
               id: makeEditId(),
               file: String(args.path),
@@ -342,18 +375,23 @@ export async function executeToolBody(
         return `已写入 ${args.path}（${newContent.length} 字符）${encNote}。`;
       }
       case "list_directory": {
-        const dir = args.path ? resolveSafe(ctx.workspaceRoot, String(args.path)) : ctx.workspaceRoot;
+        const dir = args.path ? resolveToolPath(ctx, String(args.path)).path : ctx.workspaceRoot;
         const entries = fs.readdirSync(dir, { withFileTypes: true });
         return entries
           .map((e) => `${e.isDirectory() ? "📁" : "📄"} ${e.name}`)
           .join("\n");
       }
       case "search_files": {
-        const results = walkMatch(ctx.workspaceRoot, String(args.pattern), 0, 200);
+        const roots = authorizedRoots(ctx);
+        const results: string[] = [];
+        for (const root of roots) {
+          results.push(...walkMatch(root, String(args.pattern), 0, Math.max(0, 200 - results.length)));
+          if (results.length >= 200) break;
+        }
         return results.length ? results.join("\n") : "未找到匹配文件。";
       }
       case "grep": {
-        const start = args.path ? resolveSafe(ctx.workspaceRoot, String(args.path)) : ctx.workspaceRoot;
+        const start = args.path ? resolveToolPath(ctx, String(args.path)).path : ctx.workspaceRoot;
         const inc = args.include ? String(args.include) : null;
         const re = new RegExp(escapeRegExp(String(args.pattern)), "i");
         const out: string[] = [];
@@ -365,9 +403,13 @@ export async function executeToolBody(
           return "⚠️ 执行命令被禁用。请在设置中开启 freesek.allowShell（高危操作）。";
         }
         const base = ctx.worktreeRoot ?? ctx.workspaceRoot;
-        const cwd = args.cwd ? resolveSafe(base, String(args.cwd)) : base;
-        const policy = execPolicyFromContext(ctx);
-        const exec = commandExecPlan(policy);
+        const cwd = args.cwd
+          ? (ctx.worktreeRoot
+            ? resolveSafe(base, String(args.cwd))
+            : resolveToolPath(ctx, String(args.cwd)).path)
+          : base;
+        let policy = execPolicyFromContext(ctx);
+        let exec = commandExecPlan(policy);
         if (exec.plan.blocked) {
           return `⛔ ${exec.plan.blockedReason}`;
         }
@@ -378,6 +420,19 @@ export async function executeToolBody(
         const shellCommand = typeof args.command === "string" ? args.command.trim() : "";
         const command = shellCommand || (argv?.length ? argv.map((value: string) => JSON.stringify(value)).join(" ") : "");
         if (!command) return "run_command 失败：command / argv 至少需要提供一个。";
+        // 缺口2：声明式执行策略 DSL 评估（优先于正则 allow/deny）。
+        if (ctx.execPolicyDocument) {
+          const decision = compileExecPolicy(ctx.execPolicyDocument)({
+            command,
+            effect: detectCommandEffect(command),
+            network: policy.network.mode ?? "off",
+          });
+          const merged = applyPolicyDecision(policy, decision);
+          if (merged.blocked) return `⛔ ${merged.blocked}`;
+          policy = merged.policy;
+          exec = commandExecPlan(policy);
+          if (exec.plan.blocked) return `⛔ ${exec.plan.blockedReason}`;
+        }
         // 工作区变更检测（对标 Codex shell_snapshot）：命令执行前后各取 git 快照，
         // 出现未声明变更时把提示回灌给模型核实/回滚。非 git 仓库自动跳过，不阻塞执行。
         const before = await snapshotGitStatus(cwd);
@@ -408,8 +463,8 @@ export async function executeToolBody(
         return await ctx.askUser(req);
       }
       case "edit_file": {
-        autoCheckpoint(ctx);
-        const fp = resolveSafe(ctx.workspaceRoot, String(args.path));
+        const { path: fp, root: fileRoot } = resolveToolPath(ctx, String(args.path));
+        autoCheckpoint(ctx, fileRoot);
         const buf = fs.readFileSync(fp);
         const info = decodeBuffer(buf);
         const content = info.text;
@@ -459,7 +514,12 @@ export async function executeToolBody(
         return `已编辑 ${args.path}（${args.replace_all ? count : 1} 处替换）${encNote}。`;
       }
       case "glob": {
-        const results = walkMatch(ctx.workspaceRoot, String(args.pattern), 0, 500);
+        const roots = authorizedRoots(ctx);
+        const results: string[] = [];
+        for (const root of roots) {
+          results.push(...walkMatch(root, String(args.pattern), 0, Math.max(0, 500 - results.length)));
+          if (results.length >= 500) break;
+        }
         return results.length ? results.join("\n") : "未找到匹配文件。";
       }
       case "load_skill": {
@@ -745,15 +805,15 @@ export async function executeToolBody(
         if (name === "mcp_read_resource") {
           const uri = String(args.uri ?? "");
           if (!uri) return "⚠️ mcp_read_resource 需要 uri。";
-          return await mcpManager.callResource(uri, ctx.signal);
+          return await activeMcpManager.callResource(uri, ctx.signal);
         }
         if (name === "mcp_get_prompt") {
           const pname = String(args.name ?? "");
           if (!pname) return "⚠️ mcp_get_prompt 需要 name。";
-          return await mcpManager.callPrompt(pname, args.arguments || {}, ctx.signal);
+          return await activeMcpManager.callPrompt(pname, args.arguments || {}, ctx.signal);
         }
         if (name === "mcp_list_kb") {
-          return mcpManager.knowledgeSummary() || "（未连接任何暴露检索工具/资源的 MCP server）";
+          return activeMcpManager.knowledgeSummary() || "（未连接任何暴露检索工具/资源的 MCP server）";
         }
         // mcp_kb_search
         {
@@ -761,16 +821,13 @@ export async function executeToolBody(
           if (!q) return "⚠️ mcp_kb_search 需要 query。";
           const server = args.server ? String(args.server) : undefined;
           const max = Math.min(Math.max(Number(args.max) || 5, 1), 50);
-          return await mcpManager.searchKnowledge(q, server, max, ctx.signal);
+          return await activeMcpManager.searchKnowledge(q, server, max, ctx.signal);
         }
       case "delete_file": {
         const raw = String(args.path ?? "").trim();
         if (!raw) return "⚠️ delete_file 需要 path。";
-        const abs = resolveSafe(ctx.workspaceRoot, raw);
-        const rel = path.relative(ctx.workspaceRoot, abs);
-        if (rel.startsWith("..") && path.isAbsolute(raw)) {
-          return "⛔ 禁止删除工作区外路径。";
-        }
+        const { path: abs, root: fileRoot } = resolveToolPath(ctx, raw);
+        autoCheckpoint(ctx, fileRoot);
         if (!fs.existsSync(abs)) return `未找到路径：${raw}`;
         const recursive = args.recursive === true;
         const stats = fs.statSync(abs);
@@ -815,7 +872,7 @@ export async function executeToolBody(
       default: {
         // 动态 MCP 工具与 connector 仍只提供 body dispatch；审批/模式/超时由 ToolRuntime 包裹。
         if (name.startsWith("mcp__")) {
-          return await mcpManager.callTool(name, args, ctx.signal);
+          return await activeMcpManager.callTool(name, args, ctx.signal);
         }
         const r = await dispatchConnectorTool(name, args, ctx);
         if (r.handled) return r.result;
@@ -848,7 +905,7 @@ export function maybeOffload(result: string, offloadDir?: string, threshold = 50
 }
 
 /** 合并内置工具与已连接 MCP server 的工具定义，供系统提示词与模型调用使用。 */
-export function getAllToolDefinitions(): ToolDefinition[] {
+export function getAllToolDefinitions(manager: McpManager = mcpManager): ToolDefinition[] {
   // 内置工具 + MCP 工具 + 连接器插件工具
-  return [...TOOL_DEFINITIONS, ...mcpManager.getToolDefinitions(), ...connectorToolDefinitions()];
+  return [...TOOL_DEFINITIONS, ...manager.getToolDefinitions(), ...connectorToolDefinitions()];
 }

@@ -1,110 +1,148 @@
 #!/usr/bin/env node
 /**
- * FreeSeek 一键发布（零依赖，Node 18+）。
- * 用法：
- *   node scripts/release.mjs                 # patch：0.16.4 → 0.16.5
- *   node scripts/release.mjs --minor         # minor：0.16.4 → 0.17.0
- *   node scripts/release.mjs --major
- *   node scripts/release.mjs --version 0.17.0
- * 流程：
- *   1) npm run check —— 工程门禁（typecheck + hygiene + JSDoc），失败即中止
- *   2) bump package.json version
- *   3) npm run compile —— 生产构建（extension + headless + eval + bench + webview + mermaid）
- *   4) vsce package —— 打包 vsix
- *   5) 归拢 vsix 到 releases/ 并追加 CHANGELOG.md 条目
- * 借鉴：codex 发布脚本化（build/release 任务编排）、deepseek-harness 版本纪律。
+ * FreeSeek release-artifact gate and packager.
+ *
+ * Version promotion is deliberately NOT performed here. The audited release commit must already
+ * contain matching package.json/package-lock/project-state versions before this script starts.
+ * This avoids the historical failure mode where a packaging script silently changed only one
+ * version source after the repository gates had already passed.
+ *
+ * Usage:
+ *   node scripts/release.mjs
+ *   node scripts/release.mjs --version 0.19.0-beta.4
+ *   node scripts/release.mjs --version 0.19.0-rc.1 \
+ *     --interop-report reports/client-a.json --interop-report reports/client-b.json
  */
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const PKG = join(ROOT, "package.json");
 const RELEASES = join(ROOT, "releases");
 
-function run(cmd, args, cwd = ROOT) {
-  // Windows 下 npx/npm 是 .cmd，必须走 shell；但 shell:true + args 会触发 Node DEP0190 弃用告警，
-  // 因此拼成带引号的单命令字符串再交给 shell（参数引号化避免拼接注入）。
-  const r =
-    process.platform === "win32"
-      ? spawnSync(`${cmd} ${args.map((a) => `"${String(a).replaceAll('"', '\\"')}"`).join(" ")}`, {
-          cwd,
-          stdio: "inherit",
-          shell: true,
-        })
-      : spawnSync(cmd, args, { cwd, stdio: "inherit" });
-  if (r.status !== 0) {
-    console.error(`✗ ${cmd} ${args.join(" ")} 失败，中止发布`);
-    process.exit(1);
-  }
+function fail(message) {
+  console.error(`✗ ${message}`);
+  process.exit(1);
 }
 
-function bump(ver, kind) {
-  const [maj, min, pat] = ver.split(".").map(Number);
-  if (kind === "major") return `${maj + 1}.0.0`;
-  if (kind === "minor") return `${maj}.${min + 1}.0`;
-  return `${maj}.${min}.${pat + 1}`;
+function run(cmd, args, options = {}) {
+  const result = process.platform === "win32" && ["npm", "npx"].includes(cmd)
+    ? spawnSync(`${cmd} ${args.map((arg) => `"${String(arg).replaceAll('"', '\\"')}"`).join(" ")}`, {
+        cwd: ROOT,
+        stdio: options.capture ? "pipe" : "inherit",
+        encoding: options.capture ? "utf8" : undefined,
+        shell: true,
+      })
+    : spawnSync(cmd, args, {
+        cwd: ROOT,
+        stdio: options.capture ? "pipe" : "inherit",
+        encoding: options.capture ? "utf8" : undefined,
+      });
+  if (result.status !== 0) {
+    if (options.capture) {
+      if (result.stdout) process.stderr.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+    }
+    fail(`${cmd} ${args.join(" ")} failed (exit ${result.status})`);
+  }
+  return result;
+}
+
+function parseArgs(argv) {
+  const out = { expectedVersion: null, interopReports: [] };
+  for (let index = 0; index < argv.length; index++) {
+    const arg = argv[index];
+    if (arg === "--version") out.expectedVersion = argv[++index] ?? fail("--version requires a value");
+    else if (arg === "--interop-report") out.interopReports.push(argv[++index] ?? fail("--interop-report requires a path"));
+    else if (arg === "--help" || arg === "-h") {
+      console.log("Usage: node scripts/release.mjs [--version X.Y.Z[-rc.N]] [--interop-report file] [--interop-report file]");
+      process.exit(0);
+    } else fail(`unknown argument: ${arg}`);
+  }
+  return out;
+}
+
+function sha256(file) {
+  return createHash("sha256").update(readFileSync(file)).digest("hex");
+}
+
+function requiresIndependentInterop(version) {
+  return /^\d+\.\d+\.\d+$/.test(version) || /-rc\.\d+$/.test(version);
+}
+
+function assertCleanWorktree() {
+  const result = run("git", ["status", "--porcelain"], { capture: true });
+  if (String(result.stdout ?? "").trim()) fail("release worktree must be clean and committed");
 }
 
 function main() {
-  const argv = process.argv.slice(2);
-  let kind = "patch";
-  let explicit = null;
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--minor") kind = "minor";
-    else if (argv[i] === "--major") kind = "major";
-    else if (argv[i] === "--patch") kind = "patch";
-    else if (argv[i] === "--version") explicit = argv[++i];
+  const args = parseArgs(process.argv.slice(2));
+  const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
+  const version = String(pkg.version);
+  if (args.expectedVersion && args.expectedVersion !== version) {
+    fail(`--version ${args.expectedVersion} does not match committed package version ${version}`);
   }
-  const pkg = JSON.parse(readFileSync(PKG, "utf8"));
-  const next = explicit ?? bump(pkg.version, kind);
-  console.log(`── FreeSeek release ${pkg.version} → ${next} ──`);
+  if (requiresIndependentInterop(version) && args.interopReports.length < 2) {
+    fail(`${version} requires two --interop-report files before RC/stable artifacts can be built`);
+  }
 
-  console.log("1/6 门禁（npm run check）…");
+  console.log(`── FreeSeek release artifact gate ${version} ──`);
+  assertCleanWorktree();
+  const commit = String(run("git", ["rev-parse", "HEAD"], { capture: true }).stdout ?? "").trim();
+  if (!/^[a-f0-9]{40}$/i.test(commit)) fail("unable to resolve full release candidate Git commit");
+
+  console.log("1/8 repository gates …");
   run("npm", ["run", "check"]);
+  console.log("2/8 full regression …");
+  run("npm", ["test"]);
+  console.log("3/8 ACP process conformance …");
+  run("npm", ["run", "acp:conformance"]);
 
-  console.log("2/6 版本 bump…");
-  pkg.version = next;
-  writeFileSync(PKG, JSON.stringify(pkg, null, 2) + "\n", "utf8");
-
-  // CHANGELOG 必须先于 vsce package 更新：vsce 会把 CHANGELOG.md 作为 changelog.md 打进 vsix，
-  // 若在打包后才写，安装包内嵌的 changelog 会落后一个版本（v0.17.14-16 曾因此缺条目）。
-  console.log("3/6 更新 CHANGELOG.md…");
-  const changelog = join(ROOT, "CHANGELOG.md");
-  // 优先从 README「更新记录」提取 v{next} 真实条目；未写则占位并提示。
-  const entry = (() => {
-    const readme = join(ROOT, "README.md");
-    if (existsSync(readme)) {
-      const md = readFileSync(readme, "utf8");
-      const re = new RegExp(`^### v${next}[\\s\\S]*?(?=^### v|^## |\\z)`, "m");
-      const m = md.match(re);
-      if (m) return m[0].replace(/^### v/, "## v").trim() + "\n\n";
-    }
-    return `## v${next}\n\n- （发布时请把本次改动写入 README「更新记录」或直接编辑本条。）\n\n`;
-  })();
-  if (existsSync(changelog)) {
-    // 在 "# 标题" 之后插入新条目，避免把 `## v0.x` 顶到文档标题上方
-    const cur = readFileSync(changelog, "utf8");
-    const m = cur.match(/^# .+\n+/);
-    writeFileSync(changelog, m ? `${m[0]}${entry}${cur.slice(m[0].length)}` : `${entry}${cur}`, "utf8");
+  if (requiresIndependentInterop(version)) {
+    console.log("4/8 independent ACP client evidence …");
+    run("node", [
+      join(ROOT, "scripts", "acp-interop-gate.mjs"),
+      ...args.interopReports.map((file) => resolve(ROOT, file)),
+      "--expected-version", version,
+      "--expected-commit", commit,
+    ]);
   } else {
-    writeFileSync(changelog, `# FreeSeek 变更日志\n\n${entry}`, "utf8");
+    console.log("4/8 independent ACP client evidence … skipped for pre-RC checkpoint");
   }
 
-  console.log("4/6 生产构建…");
-  run("node", ["esbuild.js", "--production"]);
+  console.log("5/8 production build (VS Code + CLI + ACP + Eval/Bench + Webview) …");
+  run("node", [join(ROOT, "esbuild.js"), "--production"]);
+  console.log("6/8 built-artifact smoke …");
+  run("node", [join(ROOT, "scripts", "smoke.mjs"), "--built"]);
 
-  console.log("5/6 vsce package…");
-  // --baseContentUrl 修复新 vsce 对 README 内相对链接的仓库 URL 校验报错
-  run("npx", ["vsce", "package", "--baseContentUrl", "https://raw.githubusercontent.com/freeseek/freeseek-copilot/main"]);
+  mkdirSync(RELEASES, { recursive: true });
+  console.log("7/8 package VSIX and npm artifact …");
+  const vsixName = `freeseek-copilot-${version}.vsix`;
+  const rootVsix = join(ROOT, vsixName);
+  const releaseVsix = join(RELEASES, vsixName);
+  if (existsSync(rootVsix)) rmSync(rootVsix);
+  if (existsSync(releaseVsix)) rmSync(releaseVsix);
+  run("npx", ["--no-install", "vsce", "package", "--no-dependencies", "--baseContentUrl", "https://raw.githubusercontent.com/freeseek/freeseek-copilot/main"]);
+  if (!existsSync(rootVsix)) fail(`VSIX was not produced: ${rootVsix}`);
+  renameSync(rootVsix, releaseVsix);
 
-  console.log("6/6 归拢产物到 releases/…");
-  if (!existsSync(RELEASES)) mkdirSync(RELEASES, { recursive: true });
-  const vsix = `freeseek-copilot-${next}.vsix`;
-  const from = join(ROOT, vsix);
-  if (existsSync(from)) renameSync(from, join(RELEASES, vsix));
-  console.log(`✓ release ${next} 完成：releases/${vsix}`);
+  for (const name of readdirSync(RELEASES)) {
+    if (name === `freeseek-copilot-${version}.tgz`) rmSync(join(RELEASES, name));
+  }
+  run("npm", ["pack", "--pack-destination", RELEASES]);
+  const tgzName = `freeseek-copilot-${version}.tgz`;
+  const releaseTgz = join(RELEASES, tgzName);
+  if (!existsSync(releaseTgz)) fail(`npm artifact was not produced: ${releaseTgz}`);
+
+  console.log("8/8 SHA256 manifest …");
+  const sums = [releaseVsix, releaseTgz]
+    .map((file) => `${sha256(file)}  ${file.split(/[\\/]/).pop()}`)
+    .join("\n") + "\n";
+  writeFileSync(join(RELEASES, "SHA256SUMS.txt"), sums, "utf8");
+  console.log(`✓ artifacts ready in ${RELEASES}`);
+  console.log("  Git merge/tag/promotion is intentionally a separate audited step.");
 }
 
 main();

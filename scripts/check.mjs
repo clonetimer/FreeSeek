@@ -7,7 +7,9 @@
  *   3) hygiene          —— src TypeScript 文件行数上限
  *   4) runtime-boundary —— raw body 只能由 ToolRegistry 持有，Registry body 只能由 ToolRuntime 调用
  *   5) benchmark-boundary —— 私有题库不入仓，real-repo 必须 immutable pin
- *   6) export-jsdoc     —— 顶层导出符号的 JSDoc 覆盖检查（warning）
+ *   6) host-boundary    —— Kernel/Host 依赖方向必须保持单向
+ *   7) version-state    —— package/lock/project-state 版本必须一致
+ *   8) export-jsdoc     —— 顶层导出符号的 JSDoc 覆盖检查（warning）
  * 借鉴：deepseek-harness（typecheck/lint/hygiene/duplication 多门禁）、codex（模块行数上限）。
  */
 import { spawnSync } from "node:child_process";
@@ -98,7 +100,83 @@ function benchmarkBoundary() {
   return problems;
 }
 
-/** 6) 导出符号 JSDoc 覆盖（启发式：export 声明前 3 行内有 /*…*\/ 或 // 注释即视为已注释）。 */
+/** 6) Host 边界：Kernel 不得反向依赖任何宿主；非 VS Code host 不得依赖 vscode。 */
+function hostBoundary() {
+  const problems = [];
+  const kernelDir = join(SRC, "kernel");
+  if (existsSync(kernelDir)) {
+    for (const f of walk(kernelDir)) {
+      const rel = relative(ROOT, f).replace(/\\/g, "/");
+      const src = readFileSync(f, "utf8");
+      if (/from\s+["']vscode["']|require\(\s*["']vscode["']\s*\)/.test(src)) {
+        problems.push(`${rel}: Kernel 禁止依赖 vscode`);
+      }
+      if (/from\s+["'][^"']*(?:\/hosts\/|\/webview\/)[^"']*["']/.test(src)) {
+        problems.push(`${rel}: Kernel 禁止反向依赖 hosts/webview`);
+      }
+    }
+  }
+  for (const host of ["cli", "acp", "desktop"]) {
+    const dir = join(SRC, "hosts", host);
+    if (!existsSync(dir)) continue;
+    for (const f of walk(dir)) {
+      const rel = relative(ROOT, f).replace(/\\/g, "/");
+      const src = readFileSync(f, "utf8");
+      if (/from\s+["']vscode["']|require\(\s*["']vscode["']\s*\)/.test(src)) {
+        problems.push(`${rel}: ${host} host 禁止依赖 vscode`);
+      }
+    }
+  }
+  const desktopDirs = [join(SRC, "hosts", "desktop"), join(ROOT, "apps", "desktop", "src")];
+  for (const dir of desktopDirs) {
+    if (!existsSync(dir)) continue;
+    for (const f of walk(dir)) {
+      const rel = relative(ROOT, f).replace(/\\/g, "/");
+      const source = readFileSync(f, "utf8");
+      if (/from\s+["'][^"']*(?:tool-runtime|tool-registry|\/agent|\/tools)[^"']*["']/.test(source)) {
+        problems.push(`${rel}: Desktop Host 必须通过 ACP，不得直接依赖 Agent/ToolRuntime/Tools`);
+      }
+    }
+  }
+  return problems;
+}
+
+/** 7) 版本一致性：开发分支的 package、lock 与项目机器台账必须指向同一版本。 */
+function versionState() {
+  const problems = [];
+  const packageFile = join(ROOT, "package.json");
+  const lockFile = join(ROOT, "package-lock.json");
+  const stateFile = join(ROOT, "docs", "project", "project-state.json");
+  if (!existsSync(stateFile)) return problems;
+  try {
+    const pkg = JSON.parse(readFileSync(packageFile, "utf8"));
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    const expected = state?.activeDevelopment?.status === "active"
+      ? state?.activeDevelopment?.version
+      : state?.stableBaseline?.version;
+    if (!expected) problems.push("project-state: 缺少当前期望版本");
+    else if (pkg.version !== expected) problems.push(`package.json=${pkg.version}，project-state=${expected}`);
+    if (existsSync(lockFile)) {
+      const lock = JSON.parse(readFileSync(lockFile, "utf8"));
+      if (lock.version !== pkg.version) problems.push(`package-lock.json 顶层 version=${lock.version}，package.json=${pkg.version}`);
+      const rootVersion = lock.packages?.[""]?.version;
+      if (rootVersion && rootVersion !== pkg.version) problems.push(`package-lock root version=${rootVersion}，package.json=${pkg.version}`);
+    }
+    const desktopPackage = join(ROOT, "apps", "desktop", "package.json");
+    if (existsSync(desktopPackage)) {
+      const desktop = JSON.parse(readFileSync(desktopPackage, "utf8"));
+      if (desktop.version !== pkg.version) problems.push(`apps/desktop/package.json=${desktop.version}，package.json=${pkg.version}`);
+    }
+    if (state?.stableBaseline?.gitTag !== `v${state?.stableBaseline?.version}`) {
+      problems.push("project-state: stableBaseline gitTag/version 不一致");
+    }
+  } catch (error) {
+    problems.push(`版本状态无法解析：${error?.message ?? error}`);
+  }
+  return problems;
+}
+
+/** 8) 导出符号 JSDoc 覆盖（启发式：export 声明前 3 行内有 /*…*\/ 或 // 注释即视为已注释）。 */
 function exportJsdoc() {
   const files = walk(SRC);
   const missing = [];
@@ -129,17 +207,17 @@ function exportJsdoc() {
 function main() {
   let fail = false;
   console.log("── FreeSeek check ───────────────────────────────");
-  console.log("1/6 source typecheck …");
+  console.log("1/8 source typecheck …");
   const sourceTypeOk = typecheck("tsconfig.check.json");
   if (!sourceTypeOk) { fail = true; console.log("  ✗ source typecheck 失败"); }
   else console.log("  ✓ source typecheck 通过");
 
-  console.log("2/6 test typecheck …");
+  console.log("2/8 test typecheck …");
   const testTypeOk = typecheck("tsconfig.tests.json");
   if (!testTypeOk) { fail = true; console.log("  ✗ test typecheck 失败"); }
   else console.log("  ✓ test typecheck 通过");
 
-  console.log("3/6 hygiene（行数上限）…");
+  console.log("3/8 hygiene（行数上限）…");
   const problems = hygiene();
   if (problems.length) {
     fail = true;
@@ -147,21 +225,35 @@ function main() {
     console.log("  提示：给超限文件头部加 `// check:max-lines N` 临时豁免，并在拆分重构后减小/移除。");
   } else console.log("  ✓ 全部文件在行数上限内");
 
-  console.log("4/6 runtime boundary …");
+  console.log("4/8 runtime boundary …");
   const boundary = runtimeBoundary();
   if (boundary.length) {
     fail = true;
     for (const p of boundary) console.log("  ✗ " + p);
   } else console.log("  ✓ raw body → ToolRegistry → ToolRuntime 边界完整");
 
-  console.log("5/6 benchmark boundary …");
+  console.log("5/8 benchmark boundary …");
   const benchBoundary = benchmarkBoundary();
   if (benchBoundary.length) {
     fail = true;
     for (const p of benchBoundary) console.log("  ✗ " + p);
   } else console.log("  ✓ private holdout / real-repo source 边界完整");
 
-  console.log("6/6 export JSDoc …");
+  console.log("6/8 host boundary …");
+  const hostBoundaryProblems = hostBoundary();
+  if (hostBoundaryProblems.length) {
+    fail = true;
+    for (const p of hostBoundaryProblems) console.log("  ✗ " + p);
+  } else console.log("  ✓ Kernel → Host 依赖方向未被反转");
+
+  console.log("7/8 version/project-state coherence …");
+  const versionProblems = versionState();
+  if (versionProblems.length) {
+    fail = true;
+    for (const p of versionProblems) console.log("  ✗ " + p);
+  } else console.log("  ✓ package / lock / project-state 版本一致");
+
+  console.log("8/8 export JSDoc …");
   const missing = exportJsdoc();
   if (missing.length) {
     console.log(`  ⚠ ${missing.length} 个导出缺 JSDoc（建议补齐，不阻塞）`);

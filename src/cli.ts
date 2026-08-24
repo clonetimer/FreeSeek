@@ -13,6 +13,9 @@ declare const __FREESEEK_CLI_ENTRY__: string | undefined;
 import { runHeadless } from "./headless";
 import { runEvalCli } from "./eval-cli";
 import { runBenchCli } from "./bench-cli";
+import { runAcpCli } from "./acp-server";
+import { runWebConsole } from "./web-cli";
+import { runPluginCli } from "./plugin-cli";
 import { ensureSessionEventIndex } from "./event-index";
 import { querySessionEvents } from "./eventlog";
 import { assertSafeSessionId } from "./session-id";
@@ -44,6 +47,9 @@ function usage(): string {
     "  freeseek run [headless options]   运行 Coding Agent（默认命令）",
     "  freeseek eval [eval options]      运行 Eval Harness",
     "  freeseek bench [bench command]    运行 Bench / Context A/B",
+    "  freeseek acp [acp options]        启动 ACP v1 stdio Agent Server",
+    "  freeseek web [web options]        启动本地 Web Console（浏览器端）",
+    "  freeseek plugin <add|remove|list> 管理插件（npm / git / 本地目录，对标 dsh plugin）",
     "  freeseek doctor [options]         检查本机运行环境（不输出密钥）",
     "  freeseek sessions [options]       列出 durable Headless sessions",
     "  freeseek replay <id> [options]    查看 session EventLog",
@@ -51,7 +57,7 @@ function usage(): string {
     "  freeseek help                     显示本帮助",
     "",
     "兼容：直接以 --prompt 开头的旧 freeseek 调用仍等价于 `freeseek run ...`。",
-    "运行 `freeseek run --help` / `freeseek eval --help` / `freeseek bench --help` 查看子命令参数。",
+    "运行 `freeseek run --help` / `freeseek acp --help` / `freeseek eval --help` / `freeseek bench --help` 查看子命令参数。",
   ].join("\n");
 }
 
@@ -228,6 +234,9 @@ export async function runFreeSeekCli(argv = process.argv.slice(2), io: CliIO = P
   if (first === "replay") return runReplay(argv.slice(1), io);
   if (first === "eval") return runEvalCli(argv.slice(1));
   if (first === "bench") return runBenchCli(argv.slice(1));
+  if (first === "acp") return runAcpCli(argv.slice(1), io);
+  if (first === "web") return runWebConsole(argv.slice(1), io);
+  if (first === "plugin") return runPluginCli(argv.slice(1), io);
   if (first === "run") return runHeadless(argv.slice(1), io);
   // Backward compatibility: 0.17.x `freeseek --prompt ...` directly entered Headless.
   if (first.startsWith("--")) return runHeadless(argv, io);

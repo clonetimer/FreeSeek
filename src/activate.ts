@@ -3,6 +3,7 @@
  * 仅做命令注册与一次性初始化；ChatViewProvider 定义仍在 extension.ts。
  */
 import * as vscode from "vscode";
+import * as path from "node:path";
 import { ChatViewProvider } from "./extension";
 import { registerHttpConnector } from "./connectors/http";
 import { registerPaperSeekConnector } from "./connectors/paper_seek";
@@ -13,13 +14,36 @@ import { autoStartFreeServerIfNeeded, startFreeServer } from "./freeserver";
 import { installKit } from "./kits";
 import { Scheduler, ScheduledTask, ScheduleSpec } from "./scheduler";
 import { initializeProviderSecrets } from "./provider-secrets";
+import { FileExtensionHost } from "./kernel/extensions/package-host";
+import { loadExtensionSandboxPolicyFile } from "./kernel/extensions/sandbox-policy";
 
 /** 扩展激活入口：注册 webview provider、内置连接器、MCP server 与全部 freesek.* 命令。 */
 export async function activate(context: vscode.ExtensionContext) {
   // 凭据必须先从普通 settings 迁入 SecretStorage，再创建 Provider/自动连接服务，
   // 避免激活早期读取到旧的明文配置。
   await initializeProviderSecrets(context);
-  const provider = new ChatViewProvider(context);
+  const configuredExtensionDirs = vscode.workspace.getConfiguration("freesek").get<string[]>("extensionDirs", []) || [];
+  const extensionDirs = configuredExtensionDirs.filter((dir: string) => path.isAbsolute(dir));
+  if (extensionDirs.length !== configuredExtensionDirs.length) {
+    void vscode.window.showWarningMessage("FreeSeek：General HMR extensionDirs 只接受显式绝对 trust root；已忽略相对路径。");
+  }
+  const configuredSandboxPolicy = vscode.workspace.getConfiguration("freesek").get<string>("extensionSandboxPolicyFile", "").trim();
+  const sandboxPolicy = configuredSandboxPolicy
+    ? path.isAbsolute(configuredSandboxPolicy)
+      ? loadExtensionSandboxPolicyFile(configuredSandboxPolicy)
+      : (() => { throw new Error("FreeSeek：freesek.extensionSandboxPolicyFile 必须是绝对路径"); })()
+    : undefined;
+  const extensionHost = extensionDirs.length ? new FileExtensionHost({
+    roots: extensionDirs,
+    stateDir: path.join(context.globalStorageUri.fsPath, "extensions"),
+    runtime: { onAudit: (event) => console.info(`[FreeSeek HMR:${event.kind}]`, event.extensionId ?? event.leaseId ?? "runtime") },
+    sandboxPolicy,
+  }) : undefined;
+  if (extensionHost) {
+    await extensionHost.start();
+    context.subscriptions.push({ dispose: () => { void extensionHost.dispose(); } });
+  }
+  const provider = new ChatViewProvider(context, extensionHost?.runtime);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(ChatViewProvider.viewType, provider, {
       webviewOptions: { retainContextWhenHidden: true },
@@ -79,6 +103,36 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("freesek.manageMCP", () => {
       vscode.commands.executeCommand("freesek.chatView.focus");
       provider.manageMCP();
+    })
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("freesek.manageExtensions", async () => {
+      if (!extensionHost) {
+        void vscode.window.showInformationMessage("FreeSeek：未配置 freesek.extensionDirs；General HMR 不会自动扫描工作区。");
+        return;
+      }
+      const snapshot = extensionHost.management.snapshot();
+      const pick = await vscode.window.showQuickPick([
+        { label: "$(refresh) Reconcile all", description: snapshot.trustRoots.join(" · "), id: "__reconcile__" },
+        ...snapshot.extensions.map((row) => ({ label: `${row.enabled ? "$(extensions)" : "$(circle-slash)"} ${row.id}`, description: `${row.health} · ${row.runtime.sandbox ? `sandbox:${row.runtime.sandbox.state}` : "in-process"} · ${row.packageVersion ?? row.runtime.activeVersion ?? "unknown"}`, detail: row.runtime.lastError ?? row.packageDirs.join(" · "), id: row.id })),
+      ], { title: "FreeSeek General HMR Extensions", placeHolder: "Inspect or manage configured extensions" });
+      if (!pick) return;
+      if (pick.id === "__reconcile__") { await extensionHost.management.reconcile(); void vscode.window.showInformationMessage("FreeSeek：Extension reconcile 完成。"); return; }
+      const row = extensionHost.management.status(pick.id);
+      const action = await vscode.window.showQuickPick([
+        { label: "Reload", value: "reload" },
+        { label: row.enabled ? "Disable (retire; keep package bytes)" : "Enable", value: row.enabled ? "disable" : "enable" },
+        { label: "Show recent audit", value: "audit" },
+      ], { title: `${row.id} · ${row.health}` });
+      if (!action) return;
+      if (action.value === "reload") await extensionHost.management.reload(row.id);
+      else if (action.value === "disable") await extensionHost.management.configure(row.id, { enabled: false });
+      else if (action.value === "enable") await extensionHost.management.configure(row.id, { enabled: true });
+      else {
+        const events = extensionHost.management.audit({ extensionId: row.id, limit: 50 });
+        const doc = await vscode.workspace.openTextDocument({ language: "json", content: JSON.stringify(events, null, 2) });
+        await vscode.window.showTextDocument(doc, { preview: true });
+      }
     })
   );
   context.subscriptions.push(

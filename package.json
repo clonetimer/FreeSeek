@@ -1,8 +1,8 @@
 {
   "name": "freeseek-copilot",
   "displayName": "FreeSeek — Local-first Coding Agent",
-  "description": "FreeSeek local-first, model-agnostic coding agent kernel for VS Code, CLI/Headless, Eval and Bench.",
-  "version": "0.18.0",
+  "description": "FreeSeek host-independent coding agent kernel for VS Code, CLI/Headless, ACP and the standalone Desktop Host.",
+  "version": "0.26.0",
   "publisher": "freeseek",
   "license": "MIT",
   "repository": {
@@ -36,6 +36,22 @@
     "onView:freesek.chatView"
   ],
   "main": "./dist/extension.js",
+  "exports": {
+    ".": {
+      "types": "./dist/sdk.d.ts",
+      "require": "./dist/sdk.js",
+      "default": "./dist/sdk.js"
+    },
+    "./sdk": {
+      "types": "./dist/sdk.d.ts",
+      "require": "./dist/sdk.js",
+      "default": "./dist/sdk.js"
+    },
+    "./acp": {
+      "require": "./dist/freeseek-acp-sidecar.js",
+      "default": "./dist/freeseek-acp-sidecar.js"
+    }
+  },
   "contributes": {
     "commands": [
       {
@@ -87,6 +103,11 @@
       {
         "command": "freesek.manageMCP",
         "title": "FreeSeek: 管理 MCP 服务",
+        "category": "FreeSeek"
+      },
+      {
+        "command": "freesek.manageExtensions",
+        "title": "FreeSeek: 管理 General HMR 扩展",
         "category": "FreeSeek"
       },
       {
@@ -488,6 +509,19 @@
           "type": "boolean",
           "default": true,
           "description": "导入 Codex / Claude Code 对话后，自动让 Agent 通读工作区关键文件并生成状态摘要，便于无缝继续对话。可在设置面板关闭。"
+        },
+        "freesek.extensionDirs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "General HMR 显式可信 Extension 根目录（仅绝对路径）。FreeSeek 不会自动扫描工作区插件；修改后请 Reload Window 以重建进程级 HMR Host。"
+        },
+        "freesek.extensionSandboxPolicyFile": {
+          "type": "string",
+          "default": "",
+          "description": "H4 untrusted Extension capability grants 的启动时只读 JSON 文件（仅绝对路径）。未配置时 untrusted tools 仍可运行，但 filesystem/network capability 会 fail-closed。"
         }
       }
     }
@@ -509,7 +543,39 @@
     "eval": "node dist/freeseek-eval.js",
     "bench": "node dist/freeseek-bench.js",
     "bench:deepseek-context": "node scripts/deepseek-context-ab.mjs",
-    "cli": "node dist/freeseek-headless.js"
+    "cli": "node dist/freeseek-headless.js",
+    "project:status": "node scripts/project-status.mjs",
+    "acp": "node dist/freeseek-acp.js",
+    "acp:conformance": "node scripts/build-acp-verification.mjs && node scripts/acp-conformance.mjs",
+    "acp:interop": "node scripts/build-acp-verification.mjs && node scripts/acp-interop-runner.mjs",
+    "acp:interop:probe": "node scripts/acp-interop-probe.mjs",
+    "acp:interop:gate": "node scripts/acp-interop-gate.mjs",
+    "desktop:build": "node scripts/desktop-build.mjs",
+    "desktop:build:prod": "node scripts/desktop-build-prod.mjs",
+    "desktop:start": "npm run desktop:build && npm --prefix apps/desktop start",
+    "desktop:smoke": "node scripts/desktop-electron-smoke.mjs",
+    "desktop:stage:portable": "node scripts/desktop-portable-stage.mjs",
+    "desktop:release:evidence": "node scripts/desktop-release-evidence.mjs",
+    "desktop:update:manifest": "node scripts/desktop-update-manifest.mjs",
+    "desktop:update:sign": "node scripts/desktop-update-sign.mjs",
+    "desktop:rc:evidence:gate": "node scripts/desktop-rc-evidence-gate.mjs",
+    "desktop:installer:portable:preflight": "node scripts/desktop-portable-install-preflight.mjs",
+    "desktop:signing:evidence:linux": "node scripts/desktop-linux-signing-evidence.mjs",
+    "desktop:signing:evidence:windows": "node scripts/desktop-windows-signing-evidence.mjs",
+    "desktop:signing:evidence:macos": "node scripts/desktop-macos-signing-evidence.mjs",
+    "desktop:artifact:portable": "node scripts/desktop-portable-artifact.mjs",
+    "desktop:installer:evidence:native": "node scripts/desktop-native-installer-evidence.mjs",
+    "desktop:stable:evidence:gate": "node scripts/desktop-stable-evidence-gate.mjs",
+    "desktop:rc:prepare": "node scripts/desktop-rc-prepare.mjs",
+    "desktop:electron:verify": "node scripts/desktop-electron-runtime-verify.mjs",
+    "desktop:native:preflight": "node scripts/desktop-native-target-preflight.mjs",
+    "desktop:native:signing:preflight": "node scripts/desktop-native-signing-preflight.mjs",
+    "desktop:native:package": "node scripts/desktop-native-target-package.mjs",
+    "desktop:native:evidence": "node scripts/desktop-native-target-evidence.mjs",
+    "desktop:signing:policy:create": "node scripts/desktop-signing-policy-create.mjs",
+    "desktop:recovery:smoke": "node scripts/desktop-packaged-recovery-smoke.mjs",
+    "desktop:native:installer:baseline": "node scripts/desktop-native-installer-baseline.mjs",
+    "desktop:stable:prepare": "node scripts/desktop-stable-prepare.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
@@ -522,12 +588,17 @@
     "typescript": "^5.4.0"
   },
   "dependencies": {
-    "mermaid": "^11.16.1",
-    "iconv-lite": "^0.6.3"
+    "cytoscape": "^3.34.1",
+    "iconv-lite": "^0.6.3",
+    "layout-base": "^2.0.1",
+    "mermaid": "^11.17.0"
   },
   "bin": {
     "freeseek": "./dist/freeseek-headless.js",
     "freeseek-eval": "./dist/freeseek-eval.js",
-    "freeseek-bench": "./dist/freeseek-bench.js"
+    "freeseek-bench": "./dist/freeseek-bench.js",
+    "freeseek-acp": "./dist/freeseek-acp.js",
+    "freeseek-web": "./dist/freeseek-web.js",
+    "freeseek-sdk": "./dist/freeseek-sdk.js"
   }
 }

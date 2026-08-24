@@ -1,5 +1,5 @@
 import { el, icSvg } from "./components-base";
-import { ui, applyTheme } from "./state";
+import { ui, applyTheme, getPluginThemes } from "./state";
 import { confirmAction } from "./components-dialogs";
 
 // ── 内嵌设置面板（对标 Codex / Claude Code 对话内设置）──
@@ -81,6 +81,23 @@ export function openSettingsModal(settings: any): void {
         b.classList.add("active");
         applyTheme(id); // 立即生效，避免等后端回包
         ui.post({ type: "update_setting", key: "theme", value: id });
+      });
+      swatches.appendChild(b);
+    }
+    // 插件皮肤（freeseek plugin add 安装的 themes）：动态追加到主题选择器
+    for (const p of getPluginThemes()) {
+      const b = el("button", "theme-swatch" + (p.name === curTheme ? " active" : "")) as HTMLButtonElement;
+      b.dataset.theme = p.name;
+      b.title = `插件皮肤：${p.label}`;
+      const dot = el("span", "theme-dot");
+      dot.style.background = "linear-gradient(135deg, #7c8aa0, #b08968)";
+      b.appendChild(dot);
+      b.appendChild(el("span", "theme-label", p.label));
+      b.addEventListener("click", () => {
+        for (const s of Array.from(swatches.querySelectorAll(".theme-swatch"))) s.classList.remove("active");
+        b.classList.add("active");
+        applyTheme(p.name);
+        ui.post({ type: "update_setting", key: "theme", value: p.name });
       });
       swatches.appendChild(b);
     }

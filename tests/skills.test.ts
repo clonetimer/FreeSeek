@@ -233,3 +233,28 @@ test("looksLikeTaskListOnly: 过短或不足 3 行不误判", () => {
   assert.equal(looksLikeTaskListOnly("- 只一行"), false);
   assert.equal(looksLikeTaskListOnly("普通文字回答，没有列表"), false);
 });
+
+test("SkillManager overlays H2 generation skill snapshots as read-only assets", () => {
+  const base = new SkillManager([]);
+  const overlaid = base.withExtensionAssets([{
+    name: "hmr-demo-skill",
+    source: "pkg/skills/demo/SKILL.md",
+    markdown: [
+      "---",
+      "name: hmr-demo-skill",
+      "description: HMR skill",
+      "triggers: [hmr]",
+      "tools: read_file",
+      "---",
+      "# HMR V1",
+    ].join("\n"),
+  }], ["read_file"]);
+  assert.equal(base.listAll().some((skill) => skill.name === "hmr-demo-skill"), false, "base manager must stay unchanged");
+  const asset = overlaid.listAll().find((skill) => skill.name === "hmr-demo-skill");
+  assert.ok(asset?.readonly);
+  assert.equal(asset?.source, "extension");
+  assert.match(overlaid.getSummary("."), /hmr-demo-skill/);
+  assert.match(overlaid.loadSkill("hmr-demo-skill"), /# HMR V1/);
+  assert.equal(overlaid.setStatus("hmr-demo-skill", "pending").ok, false);
+  assert.equal(overlaid.delete("hmr-demo-skill").ok, false);
+});

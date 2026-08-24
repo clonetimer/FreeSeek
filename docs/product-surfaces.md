@@ -1,74 +1,57 @@
 # FreeSeek Product Surfaces
 
-FreeSeek is **one Agent Kernel with multiple hosts**, not a VS Code-only agent and not a collection of separate agents.
-
-## Decision
+FreeSeek is one Agent Kernel with multiple hosts.
 
 ```text
 FreeSeek Kernel
-├─ FreeSeek for VS Code        primary interactive client (stable)
-├─ FreeSeek CLI / Headless     terminal, CI, benchmark, automation (stable)
-├─ FreeSeek Agent Server       ACP/protocol adapter for other IDEs (next)
-└─ FreeSeek Web Console        remote tasks/trace/bench/sandbox control plane (later)
+├─ FreeSeek for VS Code        stable
+├─ FreeSeek CLI / Headless     stable
+├─ FreeSeek ACP Agent Server   stable
+├─ FreeSeek SDK                0.25 library entry + `freeseek-sdk` CLI
+├─ FreeSeek Desktop            0.20 in development
+└─ FreeSeek Web Console        0.24 local HTTP/SSE console (0.25 browser approval)
 ```
 
-The package/extension id `freeseek-copilot` stays unchanged for upgrade compatibility. `FreeSeek` is the user-facing product name.
+## Standalone Desktop (0.20)
 
-## Why VS Code remains the primary client
+The desktop application is a **client of the stable ACP Host**, not a fourth copy of the Agent. Electron owns native window/dialog integration; `freeseek-acp` owns Agent execution, tools, permissions, MCP, Skills, EventLog and durable sessions.
 
-The daily coding loop benefits from editor-native state that a generic web chat cannot reproduce cheaply:
+Initial architecture:
 
-- current editor/selection and multi-root workspace context;
-- diff review and explicit accept/reject flows;
-- diagnostics, LSP symbols and navigation;
-- terminal/task integration;
-- file permission prompts close to the edited artifact.
+```text
+Renderer → contextBridge IPC → Electron Main → ACP stdio → FreeSeek Kernel
+```
 
-The VS Code extension should therefore stay the flagship interactive surface while the Kernel remains host-independent.
+This keeps the desktop shell replaceable and proves the 0.19 cross-host boundary in a first-party product.
 
-## Why CLI / Headless is a first-class stable surface
+## Web Console (0.24)
 
-CLI/Headless is not a fallback UI. It is the stable automation host for:
+The Web Console is a **local loopback HTTP/SSE host** that projects the same ACP control plane into a browser, mirroring the Desktop topology:
 
-- CI and scheduled tasks;
-- benchmark/eval runs;
-- scripts and terminal-first users;
-- remote sandbox jobs;
-- future PR/issue automation.
+```text
+Browser → HTTP/SSE → WebConsoleServer → ACP client → freeseek-acp sidecar → FreeSeek Kernel
+```
 
-It must reuse `runAgent → ToolRegistry → ToolRuntime → EventLog`; it must not grow a second security or agent implementation.
+Agent execution, tools, permissions, MCP, Skills and durable sessions are still owned by `freeseek-acp`; the console is transport/projection only. Entry: `freeseek web` / `freeseek-web` (default `127.0.0.1:3080`). Security defaults: loopback bind, random access token, same-origin guard, and fail-closed permission requests unless `--yes`. 0.25: permission requests and ask_user forms are pushed over SSE and answered via `POST /api/session/respond`; `--yes` still bypasses.
 
-## Why not build a standalone IDE now
+## SDK (0.25)
 
-A CodeBuddy-style native IDE would require owning editor rendering, extensions, terminal, SCM, settings, updates and platform compatibility. That cost does not improve the FreeSeek Kernel itself. VS Code + a future Agent Server reaches most IDE users without taking on an editor fork.
+`require("freeseek")` and the `freeseek-sdk` CLI share one export surface: `runAgent` / `sandboxes` / `policy` / `sync`. It is a **library projection** of the headless host — same Kernel, same EventLog, same security defaults; `run` passes `--mode coder|plan|ask`, `--tui`, `--exec-policy`, and `--sandbox remote:*` through to the headless runner. See `docs/sdk.md`.
 
-A standalone shell/desktop app can be reconsidered only if benchmarked workflows require capabilities that editor plugins and Agent Server clients cannot provide.
+## CLI 0.25 additions
 
-## Agent Server / ACP direction
-
-The next cross-editor surface should be a protocol adapter, not another bespoke UI. The adapter should expose session lifecycle, streaming messages, approvals, tool presentation and cancellation while keeping policy/tool execution inside FreeSeek Kernel.
-
-The protocol layer must never be allowed to call raw tool bodies or bypass `ToolRuntime`.
-
-## Web Console direction
-
-A future Web Console should be a **control plane**, not the primary code editor. High-value views are:
-
-- active/local/remote sessions;
-- background/scheduled jobs;
-- trace and EventLog inspection;
-- Bench/Eval comparisons;
-- remote sandbox/workspace status;
-- checkpoint/fork/time-travel controls;
-- team policy/provider management.
-
-If code editing is required, the console should link/open the relevant IDE or remote workspace rather than reimplement a full editor first.
+- `--tui`: interactive incremental terminal UI (streaming render + keyboard approval / ask_user forms); auto-degrades to plain streaming on non-TTY.
+- `--exec-policy <policy.json>`: declarative ExecPolicy DSL overrides `run_command` default approval; behavior identical to 0.24 when absent.
+- `--sandbox remote:docker|ssh|e2b@<target>`: executes `run_command` on a remote transport (three-state transport, see `docs/remote-sandbox.md`).
+- `--mode coder|plan|ask`: aligned with the SDK CLI.
 
 ## Surface invariants
 
-1. One session/event model across all hosts.
-2. One `ToolRegistry` / `ToolRuntime` security boundary.
-3. Host capabilities are injected; Kernel code does not import VS Code at module load time.
-4. Provider identity is runtime configuration, never part of the core persona.
-5. A feature is not complete if it only works in one host without an explicit host-capability reason.
-6. Web/Agent Server clients render approvals; policy ownership stays in Runtime.
+1. One session/event model across hosts.
+2. One ToolRegistry/ToolRuntime security boundary.
+3. Host capabilities are explicit and fail closed.
+4. Desktop renderer has no Node/tool/filesystem privilege.
+5. Desktop does not import Agent/ToolRuntime/Tools directly.
+6. Web Console is loopback-only, token-gated, and same-origin guarded.
+7. General HMR remains after Desktop Stable.
+8. SDK is a library projection of the headless host, not a duplicate Kernel.

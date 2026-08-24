@@ -55,6 +55,30 @@ function buildWithEsbuild() {
     if (status !== 0) return null;
     built.push(out);
   }
+  // esbuild 布局下，部分测试（acp-cli-stdio / desktop-runtime-e2e）会以 __dirname/../src
+  // 定位已编译的 CLI/ACP 入口（即 <root>/tests/src/<name>.js）。这里把两个入口预置到该位置，
+  // 且不带 __FREESEEK_CLI_ENTRY__ define（避免模块加载即自动启动，与 tsc emit 行为一致）。
+  const entryBundles = [
+    ["src/acp-server.ts", "acp-server.js"],
+    ["src/cli.ts", "cli.js"],
+  ];
+  const srcStaging = join(TESTS, "src");
+  mkdirSync(srcStaging, { recursive: true });
+  for (const [entry, outName] of entryBundles) {
+    const status = run(process.execPath, [
+      esbuildBin,
+      join(ROOT, entry),
+      "--bundle",
+      "--platform=node",
+      "--format=cjs",
+      `--outfile=${join(srcStaging, outName)}`,
+      "--external:vscode",
+      "--external:esbuild",
+      "--external:node:*",
+      "--log-level=error",
+    ], false, "pipe");
+    if (status !== 0) return null;
+  }
   return built;
 }
 

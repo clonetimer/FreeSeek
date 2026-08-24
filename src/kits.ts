@@ -25,6 +25,13 @@ export interface KitManifest {
   skills?: Array<{ name: string }>;
   commands?: Array<{ name: string }>;
   agents?: Array<{ name: string }>;
+  /**
+   * 皮肤主题（webview 面板换肤，对标 DSH 的 web-ui 类 bundle）。
+   * 每项 { name, file? }：file 默认 themes/<name>.css，内容约定为
+   * `body[data-theme="<name>"] { ... }` 的 CSS 变量覆盖块。
+   * 安装后落到 <root>/.agent/themes/<name>.css，由 VS Code 面板扫描注入。
+   */
+  themes?: Array<{ name: string; file: string }>;
 }
 
 export function parseKitManifest(json: string): KitManifest | null {
@@ -42,6 +49,16 @@ export function parseKitManifest(json: string): KitManifest | null {
       : typeof d.requires === "string"
         ? d.requires.split(",").map((x: string) => x.trim()).filter(Boolean)
         : [];
+    const themes = Array.isArray(d.themes)
+      ? d.themes
+          .map((x: any): { name: string; file: string } | null => {
+            const name = String(x?.name ?? "").trim();
+            if (!name) return null;
+            const file = String(x?.file ?? `themes/${name}.css`).trim();
+            return { name, file: file || `themes/${name}.css` };
+          })
+          .filter((x: { name: string; file: string } | null): x is { name: string; file: string } => !!x)
+      : [];
     return {
       name: String(d.name).trim(),
       version: d.version ? String(d.version) : undefined,
@@ -51,6 +68,7 @@ export function parseKitManifest(json: string): KitManifest | null {
       skills: pick(d, "skills"),
       commands: pick(d, "commands"),
       agents: pick(d, "agents"),
+      themes: themes.length ? themes : undefined,
     };
   } catch {
     return null;
@@ -62,6 +80,8 @@ export interface KitInstallResult {
   skills: number;
   commands: number;
   agents: number;
+  /** 安装的皮肤主题数。 */
+  themes: number;
   /** 实际复制到的目标文件绝对路径清单（供 uninstallKit 逆操作）。 */
   installed: string[];
   /** 本次覆盖的已存在文件（同名冲突报告）。 */
@@ -170,6 +190,10 @@ export function installKit(kitDir: string, projectRoot: string): KitInstallResul
   for (const a of mf.agents ?? []) {
     if (copyIfExists(path.join(kitDir, "agents", `${a.name}.md`), path.join(projectRoot, ".agent", "agents", `${a.name}.md`))) nA++;
   }
+  let nT = 0;
+  for (const t of mf.themes ?? []) {
+    if (copyIfExists(path.join(kitDir, t.file), path.join(projectRoot, ".agent", "themes", `${t.name}.css`))) nT++;
+  }
 
   // 登记注册表（含依赖校验）
   const reg = readKitRegistry(projectRoot);
@@ -186,8 +210,8 @@ export function installKit(kitDir: string, projectRoot: string): KitInstallResul
 
   const depNote = missingRequires.length ? ` 缺少依赖：${missingRequires.join("、")}（不影响本次安装）。` : "";
   const ovwNote = overwritten.length ? ` 覆盖已有文件 ${overwritten.length} 个。` : "";
-  const summary = `已安装套件「${mf.name}」：技能 ${nS} / 命令 ${nC} / 子代理角色 ${nA}。${ovwNote}${depNote}`;
-  return { manifest: mf.name, skills: nS, commands: nC, agents: nA, installed, overwritten, missingRequires, summary };
+  const summary = `已安装套件「${mf.name}」：技能 ${nS} / 命令 ${nC} / 子代理角色 ${nA} / 主题 ${nT}。${ovwNote}${depNote}`;
+  return { manifest: mf.name, skills: nS, commands: nC, agents: nA, themes: nT, installed, overwritten, missingRequires, summary };
 }
 
 /**

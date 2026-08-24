@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "kind": "freesek-field-evidence-summary",
+  "date": "2026-08-20",
+  "source": "user-provided Windows beta.7 validation transcript",
+  "candidate": {
+    "version": "0.19.0-beta.7",
+    "gitCommit": "17c29e0d8ef1bb7acd43ccea33013195e59d2fa9"
+  },
+  "windows": {
+    "powershell": "5.1.26100.9168",
+    "node": "v24.12.0",
+    "npm": "11.13.0",
+    "git": "2.52.0.windows.1"
+  },
+  "artifacts": {
+    "builtArtifactSmoke": "pass",
+    "vsix": "produced",
+    "npmCliTgz": "produced"
+  },
+  "independentAcpClients": [
+    {
+      "implementationOwner": "agentclientprotocol",
+      "implementationId": "typescript-sdk",
+      "clientVersion": "1.3.0",
+      "initialize": true,
+      "newSession": true,
+      "prompt": true,
+      "sessionUpdate": true,
+      "advancedCapabilities": [
+        "additionalDirectories",
+        "resume"
+      ]
+    },
+    {
+      "implementationOwner": "openclaw",
+      "implementationId": "acpx",
+      "clientVersion": "0.13.0",
+      "initialize": true,
+      "newSession": true,
+      "prompt": true,
+      "sessionUpdate": true,
+      "advancedCapabilities": []
+    }
+  ],
+  "gateAssessment": {
+    "independentImplementations": 2,
+    "advancedEvidencePresent": true,
+    "substantiveResult": "pass",
+    "wrapperFailure": "beta.7 validation invocation passed --min-clients 2; the old parser treated option value 2 as a third report path"
+  }
+}

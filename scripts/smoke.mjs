@@ -1,12 +1,14 @@
 /**
- * FreeSeek 冒烟测试（零依赖，node:test）。
+ * FreeSeek production artifact smoke (zero runtime dependencies beyond the built tree).
  *
- * 用法：
- *   node scripts/smoke.mjs            # 类型检查 + 构建 + dist 产物完整性
- *   node scripts/smoke.mjs --package  # 额外打包 vsix 并校验
+ * Usage:
+ *   node scripts/smoke.mjs            # typecheck + build + artifact contract checks
+ *   node scripts/smoke.mjs --package  # additionally package and validate VSIX
+ *   node scripts/smoke.mjs --built    # artifact checks only after an existing production build
  *
- * 目的：防止「encodeBuffer 未导入」这类低级错误漏进 vsix。
- * 每次发布前跑一遍：npm run smoke 或 npm run smoke:package
+ * IMPORTANT: this smoke test validates public/stable artifact contracts, not private
+ * implementation symbol names. Production minification/tree-shaking is allowed to rename
+ * helpers such as encodeBuffer without turning a healthy bundle into a release failure.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -18,74 +20,96 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 const withPackage = process.argv.includes("--package");
+const alreadyBuilt = process.argv.includes("--built");
 
-/** 直接以 node 运行 JS 入口（无需 shell，避免 Windows .cmd 与转义问题）。 */
+const nodeArtifacts = [
+  ["freeseek", "dist/freeseek-headless.js"],
+  ["freeseek-acp", "dist/freeseek-acp.js"],
+  ["freeseek-eval", "dist/freeseek-eval.js"],
+  ["freeseek-bench", "dist/freeseek-bench.js"],
+];
+const allArtifacts = [
+  "dist/extension.js",
+  ...nodeArtifacts.map(([, file]) => file),
+  "dist/webview.js",
+  "dist/mermaid.js",
+];
+
+/** Run a JS entry directly with Node (no shell; deterministic on Windows). */
 function runNode(entry, args = [], opts = {}) {
-  const r = spawnSync(process.execPath, [entry, ...args], {
+  return spawnSync(process.execPath, [entry, ...args], {
     cwd: root,
     encoding: "utf8",
     timeout: 180_000,
     ...opts,
   });
-  return r;
 }
 
-/** 经 shell 运行（仅 vsce 这类 .cmd 命令需要）。参数拼接为单字符串避免 DEP0190 警告。 */
+/** Run a command through a shell only for .cmd-style tools such as vsce. */
 function runShell(cmd, args, opts = {}) {
-  const r = spawnSync(`${cmd} ${args.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(" ")}`, {
+  return spawnSync(`${cmd} ${args.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(" ")}`, {
     cwd: root,
     encoding: "utf8",
     shell: true,
     timeout: 180_000,
     ...opts,
   });
-  return r;
 }
 
-test("TS 类型检查（tsc --noEmit）—— 抓未导入/类型错误", () => {
+test("TS typecheck catches import/type errors", () => {
   const tsc = path.join(root, "node_modules", "typescript", "bin", "tsc");
   const r = runNode(tsc, ["-p", "tsconfig.check.json", "--noEmit"]);
-  assert.equal(r.status, 0, `tsc 失败（exit ${r.status}）:\n${r.stdout}\n${r.stderr}`);
+  assert.equal(r.status, 0, `tsc failed (exit ${r.status}):\n${r.stdout}\n${r.stderr}`);
 });
 
-test("esbuild 构建", () => {
-  const r = runNode(path.join(root, "esbuild.js"));
-  assert.equal(r.status, 0, `构建失败（exit ${r.status}）:\n${r.stdout}\n${r.stderr}`);
+test("esbuild production tree can be created", { skip: alreadyBuilt }, () => {
+  const r = runNode(path.join(root, "esbuild.js"), ["--production"]);
+  assert.equal(r.status, 0, `build failed (exit ${r.status}):\n${r.stdout}\n${r.stderr}`);
 });
 
-test("dist 产物完整性与关键标记", () => {
-  for (const f of ["dist/extension.js", "dist/freeseek-headless.js", "dist/freeseek-eval.js", "dist/freeseek-bench.js", "dist/webview.js", "dist/mermaid.js"]) {
+test("dist artifacts satisfy the public host/package contract", () => {
+  for (const f of allArtifacts) {
     const p = path.join(root, f);
-    assert.ok(fs.existsSync(p), `${f} 缺失`);
-    assert.ok(fs.statSync(p).size > 10_000, `${f} 过小（${fs.statSync(p).size} B）`);
+    assert.ok(fs.existsSync(p), `${f} missing`);
+    assert.ok(fs.statSync(p).size > 10_000, `${f} unexpectedly small (${fs.statSync(p).size} B)`);
   }
+
+  assert.equal(pkg.main, "./dist/extension.js", "package main must point at the built VS Code host");
+  for (const [binName, artifact] of nodeArtifacts) {
+    assert.equal(pkg.bin?.[binName], `./${artifact}`, `${binName} package bin mapping drifted`);
+    const source = fs.readFileSync(path.join(root, artifact), "utf8");
+    const lines = source.split(/\r?\n/);
+    assert.equal(lines[0], "#!/usr/bin/env node", `${artifact} shebang must be line 1`);
+    assert.equal(lines.filter((line) => line.startsWith("#!")).length, 1, `${artifact} must contain exactly one shebang`);
+    // Validate that each bundled Node host is syntactically loadable by Node.
+    const checked = spawnSync(process.execPath, ["--check", path.join(root, artifact)], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    assert.equal(checked.status, 0, `${artifact} failed node --check:\n${checked.stdout}\n${checked.stderr}`);
+  }
+
+  // Validate stable extension/webview protocol strings. These are public host contracts
+  // (command ids / view ids / message types), unlike private helper function names.
   const ext = fs.readFileSync(path.join(root, "dist/extension.js"), "utf8");
-  for (const marker of ["setMode", "agent_mode", "modeSeg", "encodeBuffer", "__auto__", "browser"]) {
-    assert.ok(ext.includes(marker), `dist/extension.js 缺少关键标记「${marker}」`);
+  for (const marker of ["freesek.openChat", "freesek.chatView", "freesek.manageMCP", "agent_mode", "__auto__"]) {
+    assert.ok(ext.includes(marker), `dist/extension.js missing stable contract marker ${marker}`);
   }
   const wv = fs.readFileSync(path.join(root, "dist/webview.js"), "utf8");
   for (const marker of ["modeCraftBtn", "setMode", "agent_mode"]) {
-    assert.ok(wv.includes(marker), `dist/webview.js 缺少关键标记「${marker}」`);
+    assert.ok(wv.includes(marker), `dist/webview.js missing stable UI contract marker ${marker}`);
   }
-  assert.ok(fs.existsSync(path.join(root, "benchmarks/v1/manifest.json")), "内置 benchmark manifest 缺失");
-
-  for (const file of ["freeseek-headless.js", "freeseek-eval.js", "freeseek-bench.js"]) {
-    const source = fs.readFileSync(path.join(root, "dist", file), "utf8");
-    const lines = source.split(/\r?\n/);
-    assert.equal(lines[0], "#!/usr/bin/env node", `${file} shebang 必须位于第 1 行`);
-    assert.equal(lines.filter((line) => line.startsWith("#!")).length, 1, `${file} 只能包含一个 shebang`);
-  }
+  assert.ok(fs.existsSync(path.join(root, "benchmarks/v1/manifest.json")), "built-in benchmark manifest missing");
 });
 
-test("vsix 打包", { skip: !withPackage }, () => {
+test("VSIX package can be produced", { skip: !withPackage }, () => {
   const vsix = path.join(root, `freeseek-copilot-${pkg.version}.vsix`);
   if (fs.existsSync(vsix)) fs.rmSync(vsix);
   const r = runShell("npx", ["--no-install", "vsce", "package", "--no-dependencies"]);
-  assert.equal(r.status, 0, `vsce 打包失败（exit ${r.status}）:\n${r.stdout}\n${r.stderr}`);
-  assert.ok(fs.existsSync(vsix), `vsix 未生成: ${vsix}`);
-  assert.ok(fs.statSync(vsix).size > 100_000, `vsix 过小（${fs.statSync(vsix).size} B）`);
+  assert.equal(r.status, 0, `vsce package failed (exit ${r.status}):\n${r.stdout}\n${r.stderr}`);
+  assert.ok(fs.existsSync(vsix), `VSIX was not produced: ${vsix}`);
+  assert.ok(fs.statSync(vsix).size > 100_000, `VSIX unexpectedly small (${fs.statSync(vsix).size} B)`);
 });
 
-if (!withPackage) {
-  console.log("\n提示：运行 `node scripts/smoke.mjs --package` 可额外打包并校验 vsix。");
-}
+if (!withPackage) console.log("\nHint: run `node scripts/smoke.mjs --package` to also validate VSIX packaging.");

@@ -111,7 +111,7 @@ function extractField(field: string, input: any): string {
 }
 
 /** 规则缓存：source → mtime，规则文件改动即时重载（热加载） */
-const ruleCache = new Map<string, { mtimeMs: number; rule: HookifyRule }>();
+const ruleCache = new Map<string, { mtimeMs: number; size: number; rule: HookifyRule }>();
 
 /** 解析单个规则文件 → HookifyRule | null（解析失败返回 null） */
 function parseRuleFile(fp: string): HookifyRule | null {
@@ -164,7 +164,8 @@ function collectRuleFiles(workspaceRoot: string): string[] {
   return files;
 }
 
-/** 加载全部规则（带 mtime 缓存，热加载） */
+/** 加载全部规则（带 mtime+size 缓存，热加载）。缓存键同时含 size：同一毫秒内相同大小的改写
+ *  （如 enabled: false → true）也能被感知，避免快速连续切换返回陈旧状态。 */
 export function loadHookifyRules(workspaceRoot: string): HookifyRule[] {
   const rules: HookifyRule[] = [];
   const files = collectRuleFiles(workspaceRoot);
@@ -177,13 +178,13 @@ export function loadHookifyRules(workspaceRoot: string): HookifyRule[] {
       continue;
     }
     const cached = ruleCache.get(fp);
-    if (cached && cached.mtimeMs === stat.mtimeMs) {
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
       rules.push(cached.rule);
       continue;
     }
     const rule = parseRuleFile(fp);
     if (rule) {
-      ruleCache.set(fp, { mtimeMs: stat.mtimeMs, rule });
+      ruleCache.set(fp, { mtimeMs: stat.mtimeMs, size: stat.size, rule });
       rules.push(rule);
     } else {
       ruleCache.delete(fp);
@@ -459,6 +460,10 @@ export function toggleHookifyRule(source: string, enabled: boolean): RuleFileRes
   }
   try {
     fs.writeFileSync(source, lines.join("\n"), "utf8");
+    // 显式抬高 mtime：改写可能保持文件大小不变（如 enabled:false → true），
+    // 仅靠 mtimeMs+size 无法保证缓存失效；utimes 抬高到未来 1s 使下一次 load 必然感知。
+    const now = new Date();
+    fs.utimesSync(source, now, new Date(now.getTime() + 1000));
     return { ok: true, path: source };
   } catch (e: any) {
     return { ok: false, error: `写入失败：${e?.message ?? e}` };
