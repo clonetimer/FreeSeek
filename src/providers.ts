@@ -1,6 +1,12 @@
 // check:max-lines 680 (略超 600，纳入后续拆分)
 import { cachedProviderSecret } from "./provider-secrets";
 import { DEEPSEEK_DEFAULT_MODEL, DEEPSEEK_OFFICIAL_BASE_URL } from "./deepseek";
+import { getModelCapabilities, modelCapabilitySummary } from "./model-capabilities";
+import type { ModelCapabilities } from "./model-capabilities";
+import { inferTaskProfile } from "./provider-task-profile";
+import type { TaskProfile } from "./provider-task-profile";
+export { getModelCapabilities, modelCapabilitySummary, inferTaskProfile };
+export type { ModelCapabilities, ModelModality, TaskProfile };
 
 export interface ProviderSettingsHost {
   get<T>(key: string, fallback: T): T;
@@ -36,21 +42,6 @@ function settingsHost(): ProviderSettingsHost {
  * - toolMode：native = 走原生 function calling（官方/兼容服务），react = 走 ReAct 文本协议
  *   （免费逆向服务等不支持 tools 的服务，由 agent.ts 解析 <tool_call> 块）。
  */
-
-export type ModelModality = "text" | "image" | "audio" | "file";
-
-/** Explicit model-level capability declarations. Undefined means unknown, not unsupported. */
-export interface ModelCapabilities {
-  tools?: boolean;
-  vision?: boolean;
-  reasoning?: boolean;
-  structuredOutput?: boolean;
-  promptCaching?: boolean;
-  contextWindow?: number;
-  maxOutputTokens?: number;
-  inputModalities?: ModelModality[];
-  outputModalities?: ModelModality[];
-}
 
 export interface ModelEntry {
   id: string;
@@ -140,32 +131,6 @@ export interface ActiveSelection {
 /** Auto（智能选择）模式标记：对齐 CodeBuddy 模型面板默认选项，由 FreeSeek 自动路由模型。 */
 export const AUTO_PROVIDER_ID = "__auto__";
 export const AUTO_MODEL_ID = "__auto__";
-
-/** Auto 路由的任务画像：调用方根据本次请求推断，传给 getActiveProvider/profile，
- *  路由模块据此挑选最合适的「已配置 key + 任务匹配 + 性价比优」的 provider/model。 */
-export type TaskProfile = "chat" | "code" | "reason" | "vision" | "tools" | "long";
-
-/** 从对话历史推断任务画像（用于 Auto 模式路由）。优先看最近一条 user 消息；
- *  - 看到图片 → vision；看到工具调用链 → tools；包含 "<think>" / "推理" / 数学 → reason；
- *  - 提到代码关键词或 read_file / grep 类上下文 → code；长上下文（>8K）→ long；
- *  - 其它 → chat（默认）。 */
-export function inferTaskProfile(messages: ReadonlyArray<{ role: string; content?: string; images?: unknown[] }>): TaskProfile {
-  let lastUser = "";
-  let lastAssistant = "";
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m.role === "user" && !lastUser) lastUser = String(m.content ?? "");
-    else if (m.role === "assistant" && !lastAssistant) lastAssistant = String(m.content ?? "");
-    if (lastUser && lastAssistant) break;
-  }
-  const text = (lastUser + "\n" + lastAssistant).slice(0, 4000).toLowerCase();
-  if (/```|\.ts|\.py|\.js|class |function |import |select |<code|read_file|grep|搜索|查(找|看)文件/.test(text)) return "code";
-  if (/<think>|推理|证明|计算|推导|equation|math|微分|积分|概率|统计/.test(text)) return "reason";
-  if (/\.(png|jpg|jpeg|gif|webp)|data:image|base64|image_url|图片|截图|看图|附图/.test(text)) return "vision";
-  if (/工具调用|tool_call|tool_result|spawn_agent|run_command|edit_file|write_file/.test(text)) return "tools";
-  if (text.length > 2000) return "long";
-  return "chat";
-}
 
 /** 当前选择是否为 Auto（智能选择）模式。 */
 export function isAutoSelection(sel: ActiveSelection | null | undefined): boolean {
@@ -555,18 +520,6 @@ function buildHeaders(provider: ProviderConfig, apiKey: string, format: Provider
 }
 
 /** 由「provider + modelId」构造完整接入配置（含 endpoint / 认证头 / 透传参数）。 */
-/** Resolve capability defaults plus model-level overrides. Unknown stays undefined. */
-export function getModelCapabilities(provider: ProviderConfig, modelId: string): ModelCapabilities {
-  const model = provider.models.find((entry) => entry.id === modelId);
-  return {
-    ...(provider.capabilities ?? {}),
-    ...(model?.capabilities ?? {}),
-    ...((model?.capabilities?.contextWindow ?? provider.contextWindow) !== undefined
-      ? { contextWindow: model?.capabilities?.contextWindow ?? provider.contextWindow }
-      : {}),
-  };
-}
-
 export function buildResolvedConfig(provider: ProviderConfig, modelId: string): ResolvedConfig {
   const base = (provider.baseUrl || "").replace(/\/+$/, "");
   const format = provider.format ?? "openai";
@@ -662,21 +615,6 @@ export function getActiveToolMode(): "native" | "react" {
   if (!active) return "native";
   if (active.provider.toolMode === "react") return "react";
   return getModelCapabilities(active.provider, active.modelId).tools === false ? "react" : "native";
-}
-
-/** Human-readable capability summary; omitted fields are deliberately not guessed. */
-function modelCapabilitySummary(provider: ProviderConfig, modelId: string): string {
-  const caps = getModelCapabilities(provider, modelId);
-  const parts = [provider.name];
-  if (caps.tools !== undefined) parts.push(caps.tools ? "Tools" : "No tools");
-  if (caps.vision !== undefined) parts.push(caps.vision ? "Vision" : "No vision");
-  if (caps.reasoning !== undefined) parts.push(caps.reasoning ? "Reasoning" : "No reasoning");
-  if (caps.structuredOutput !== undefined) parts.push(caps.structuredOutput ? "Structured output" : "No structured output");
-  if (caps.inputModalities?.length) parts.push(`In: ${caps.inputModalities.join("/")}`);
-  if (caps.outputModalities?.length) parts.push(`Out: ${caps.outputModalities.join("/")}`);
-  if (caps.contextWindow !== undefined) parts.push(`${caps.contextWindow.toLocaleString()} context`);
-  if (caps.maxOutputTokens !== undefined) parts.push(`${caps.maxOutputTokens.toLocaleString()} max output`);
-  return parts.join(" · ");
 }
 
 /** 生成切换模型的 QuickPick 项（跨所有 provider 的所有模型）。 */
