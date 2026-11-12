@@ -1,6 +1,12 @@
 // check:max-lines 680 (略超 600，纳入后续拆分)
 import { cachedProviderSecret } from "./provider-secrets";
 import { DEEPSEEK_DEFAULT_MODEL, DEEPSEEK_OFFICIAL_BASE_URL } from "./deepseek";
+import { getModelCapabilities, modelCapabilitySummary } from "./model-capabilities";
+import type { ModelCapabilities } from "./model-capabilities";
+import { inferTaskProfile } from "./provider-task-profile";
+import type { TaskProfile } from "./provider-task-profile";
+export { getModelCapabilities, modelCapabilitySummary, inferTaskProfile };
+export type { ModelCapabilities, ModelModality, TaskProfile };
 
 export interface ProviderSettingsHost {
   get<T>(key: string, fallback: T): T;
@@ -37,20 +43,6 @@ function settingsHost(): ProviderSettingsHost {
  *   （免费逆向服务等不支持 tools 的服务，由 agent.ts 解析 <tool_call> 块）。
  */
 
-export type ModelModality = "text" | "image" | "audio" | "file";
-
-/** Explicit model-level capability declarations. Undefined means unknown, not unsupported. */
-export interface ModelCapabilities {
-  tools?: boolean;
-  vision?: boolean;
-  reasoning?: boolean;
-  structuredOutput?: boolean;
-  promptCaching?: boolean;
-  contextWindow?: number;
-  maxOutputTokens?: number;
-  inputModalities?: ModelModality[];
-  outputModalities?: ModelModality[];
-}
 
 export interface ModelEntry {
   id: string;
@@ -149,37 +141,7 @@ export type TaskProfile = "chat" | "code" | "reason" | "vision" | "tools" | "lon
  *  - 看到图片 → vision；看到工具调用链 → tools；包含 "<think>" / "推理" / 数学 → reason；
  *  - 提到代码关键词或 read_file / grep 类上下文 → code；长上下文（>8K）→ long；
  *  - 其它 → chat（默认）。 */
-export function inferTaskProfile(messages: ReadonlyArray<{ role: string; content?: string; images?: unknown[] }>): TaskProfile {
-  let lastUser = "";
-  let lastAssistant = "";
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m.role === "user" && !lastUser) lastUser = String(m.content ?? "");
-    else if (m.role === "assistant" && !lastAssistant) lastAssistant = String(m.content ?? "");
-    if (lastUser && lastAssistant) break;
-  }
-  const text = (lastUser + "\n" + lastAssistant).slice(0, 4000).toLowerCase();
-  if (/```|\.ts|\.py|\.js|class |function |import |select |<code|read_file|grep|搜索|查(找|看)文件/.test(text)) return "code";
-  if (/<think>|推理|证明|计算|推导|equation|math|微分|积分|概率|统计/.test(text)) return "reason";
-  if (/\.(png|jpg|jpeg|gif|webp)|data:image|base64|image_url|图片|截图|看图|附图/.test(text)) return "vision";
-  if (/工具调用|tool_call|tool_result|spawn_agent|run_command|edit_file|write_file/.test(text)) return "tools";
-  if (text.length > 2000) return "long";
-  return "chat";
-}
-
-/** 当前选择是否为 Auto（智能选择）模式。 */
-export function isAutoSelection(sel: ActiveSelection | null | undefined): boolean {
-  return !!sel && (sel.providerId === AUTO_PROVIDER_ID || sel.modelId === AUTO_MODEL_ID);
-}
-
-export interface ResolvedConfig {
-  providerId: string;
-  providerName: string;
-  /** 完整的请求端点 URL（openai 为 /chat/completions，claude 为 /v1/messages，gemini 为 generateContent） */
-  endpoint: string;
-  apiKey: string;
-  model: string;
-  toolMode: "native" | "react";
+export function inferTaskProfile(messages: "native" | "react";
   format: ProviderFormat;
   authType: AuthType;
   /** 合并后的最终请求头 */
@@ -600,21 +562,7 @@ export function resolveActiveConfig(
   /** 带 image 字段的对话历史（用于 vision 自动识别），可省略 */
   messages?: ReadonlyArray<{ role: string; content?: string; images?: unknown[] }>
 ): ResolvedConfig {
-  const active = getActiveProvider(profile ?? (messages ? inferTaskProfile(messages) : undefined));
-  if (!active) {
-    throw new Error(
-      "尚未配置任何提供商。请运行「FreeSeek: 添加提供商」向导，或在设置 freesek.providers 中填写。"
-    );
-  }
-  return buildResolvedConfig(active.provider, active.modelId);
-}
-
-/** 在 provider 的模型列表中定位目标模型：优先 id 精确，其次 name 匹配，最后原样透传（允许未收录模型，如 autoDiscover 延迟）。 */
-function pickModelId(provider: ProviderConfig, want?: string): string {
-  if (!want) return provider.models[0]?.id ?? "";
-  const byId = provider.models.find((m) => m.id === want);
-  if (byId) return byId.id;
-  const byName = provider.models.find((m) => m.name === want);
+  const active = getActiveProvider(profile const byName = provider.models.find((m) => m.name === want);
   if (byName) return byName.id;
   return want;
 }
