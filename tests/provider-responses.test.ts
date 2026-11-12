@@ -121,6 +121,16 @@ test("Responses tools use top-level function schema and retain non-strict option
   });
 });
 
+test("Responses rejects images when declared input modalities exclude image", () => {
+  const cfg = buildResolvedConfig(provider({
+    capabilities: { inputModalities: ["text"] },
+  }), "gpt-6.1-sol");
+  assert.throws(
+    () => buildResponsesBody(cfg, [{ role: "user", content: "Describe this.", images: ["data:image/png;base64,AAAA"] }], []),
+    /without image-input capability/
+  );
+});
+
 test("Responses request defaults to stateless storage and maps max_tokens to max_output_tokens", () => {
   const cfg = buildResolvedConfig(provider({
     extraBody: {
