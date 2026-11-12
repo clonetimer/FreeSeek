@@ -60,6 +60,9 @@ export async function streamChat(
   const cfg = override
     ? resolveConfigFor(override, profile, messages)
     : resolveActiveConfig(profile, messages);
+  if (cfg.capabilities.vision === false && messages.some((message) => message.images?.length)) {
+    throw new Error(`Model "${cfg.model}" is configured without vision capability but the conversation contains images.`);
+  }
   if (!cfg.apiKey && cfg.authType !== "none") {
     const hint =
       cfg.toolMode === "react"
@@ -319,7 +322,7 @@ export function buildChatBody(cfg: ResolvedConfig, messages: ChatMessage[], tool
     body.max_tokens = (cfg.extraBody.max_tokens as number) ?? 4096;
   }
   // deepseek-free-api 与官方都支持 tools 参数（官方原生；免费服务新版也已支持）。
-  if (tools.length > 0) {
+  if (tools.length > 0 && cfg.toolMode === "native" && cfg.capabilities.tools !== false) {
     body.tools = tools;
     body.tool_choice = "auto";
   }
