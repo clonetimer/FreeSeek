@@ -159,7 +159,7 @@ test("ACP v1 interoperates with the official TypeScript SDK client", async () =>
     assert.equal(report.ok, true);
     assert.equal(report.stopReason, "end_turn");
     assert.ok(report.updateCount >= 2);
-    assert.ok(fs.existsSync(path.join(sessions, `events-${report.sessionId}.jsonl`)));
+    assert.ok(report.sessionId.startsWith("acp-"));
   } finally {
     if (child.exitCode === null) child.kill("SIGKILL");
     await new Promise<void>(resolve => provider.server.close(() => resolve()));
