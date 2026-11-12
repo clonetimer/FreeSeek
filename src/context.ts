@@ -144,6 +144,17 @@ export async function tieredCompact(
   }
 
   const result: ChatMessage[] = [...systemMsgs];
+  // Stateless Responses requests must replay prior reasoning items. Preserve those opaque
+  // items even when their surrounding old text/tool transcript is summarized away.
+  const archivedReasoningItems = old.flatMap((message) => {
+    if (message.role !== "assistant" || !message.responses_output_items?.length) return [];
+    return message.responses_output_items.filter((item: any) =>
+      item && typeof item === "object" && !Array.isArray(item) && item.type === "reasoning"
+    );
+  });
+  if (archivedReasoningItems.length) {
+    result.push({ role: "assistant", content: "", responses_output_items: archivedReasoningItems });
+  }
   if (oldSummary) result.push({ role: "system", content: `## 早期对话摘要（tiered compact 分级压缩）\n${oldSummary}` });
   result.push(...middleOut, ...recent);
   // 分段压缩可能拆散 tool/tool_calls 配对（assistant 被摘要进 old、tool 结果留在 middle），
