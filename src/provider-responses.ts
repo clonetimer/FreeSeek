@@ -86,6 +86,28 @@ export function buildResponsesTools(tools: readonly ToolDefinition[]): Record<st
   }));
 }
 
+/** Map Chat Completions response_format to Responses text.format. */
+export function mapResponseFormat(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Responses response_format must be an object.");
+  }
+  const format = value as Record<string, any>;
+  if (format.type === "json_schema") {
+    const schema = format.json_schema;
+    if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+      throw new Error("response_format.json_schema must be an object.");
+    }
+    return {
+      type: "json_schema",
+      ...schema,
+    };
+  }
+  if (format.type === "json_object" || format.type === "text") {
+    return { type: format.type };
+  }
+  throw new Error(`Unsupported Responses structured-output format: ${String(format.type ?? "unknown")}`);
+}
+
 function validPositiveInteger(value: unknown): number | undefined {
   const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
   return Number.isSafeInteger(n) && n > 0 ? n : undefined;
@@ -117,6 +139,10 @@ export function buildResponsesBody(
   delete extra.include;
   delete extra.tool_choice;
   delete extra.parallel_tool_calls;
+  const legacyResponseFormat = extra.response_format;
+  delete extra.response_format;
+  const requestedTopP = extra.top_p;
+  delete extra.top_p;
 
   const maxOutputTokens =
     validPositiveInteger(cfg.extraBody.max_output_tokens) ??
@@ -143,7 +169,19 @@ export function buildResponsesBody(
     ...(typeof requestedTemperature === "number" && cfg.capabilities.reasoning === false
       ? { temperature: requestedTemperature }
       : {}),
+    ...(typeof requestedTopP === "number" && cfg.capabilities.reasoning === false
+      ? { top_p: requestedTopP }
+      : {}),
   };
+
+  if (legacyResponseFormat && body.text === undefined) {
+    if (cfg.capabilities.structuredOutput === false) {
+      throw new Error(`Model "${cfg.model}" is configured without structured-output capability.`);
+    }
+    body.text = { format: mapResponseFormat(legacyResponseFormat) };
+  } else if (body.text && cfg.capabilities.structuredOutput === false && (body.text as any).format) {
+    throw new Error(`Model "${cfg.model}" is configured without structured-output capability.`);
+  }
 
   const supportsTools = cfg.toolMode === "native" && cfg.capabilities.tools !== false;
   if (supportsTools && tools.length > 0) {
