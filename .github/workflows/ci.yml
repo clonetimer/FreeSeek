@@ -62,6 +62,7 @@ jobs:
         run: npm run check
 
       - name: Unit and integration tests
+        timeout-minutes: 10
         run: npm test
 
       - name: Production build and artifact smoke
