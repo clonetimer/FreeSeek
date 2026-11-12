@@ -22,7 +22,12 @@ export function estimateTokens(text: string): number {
 
 export function conversationTokens(messages: ChatMessage[]): number {
   let n = 0;
-  for (const m of messages) n += estimateTokens(m.content ?? "") + 4;
+  for (const message of messages) {
+    const responsesState = message.responses_output_items?.length
+      ? JSON.stringify(message.responses_output_items)
+      : "";
+    n += estimateTokens(message.content ?? "") + estimateTokens(responsesState) + 4;
+  }
   return n;
 }
 
