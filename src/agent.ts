@@ -539,6 +539,8 @@ export async function runAgent(
       content: effectiveToolCalls ? stripToolCalls(message.content ?? "") : message.content,
     };
     if (message.reasoning_content) assistantMsg.reasoning_content = message.reasoning_content;
+    if (message.responses_output_items) assistantMsg.responses_output_items = message.responses_output_items;
+    if (message.responses_phase) assistantMsg.responses_phase = message.responses_phase;
     if (effectiveToolCalls) {
       (assistantMsg as any).tool_calls = effectiveToolCalls;
     }
