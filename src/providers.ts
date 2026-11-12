@@ -488,24 +488,36 @@ function guessCostScoreFromTier(tier: ModelEntry["tier"]): number {
 /** 从 name/id 启发式识别 tier（用户没显式标注 ModelEntry.tier 时用）。 */
 function guessTierFromName(name: string): ModelEntry["tier"] {
   const n = name.toLowerCase();
-  if (/opus|sonnet\s*5|gpt-5(\.5)?\b|gpt-4\b|qwen-max|deepseek-v4-pro|deepseek-r1|reasoner|thinking|pro$|hi$|high$/.test(n)) return "flagship";
-  if (/pro\b|plus\b|3-5\b|deepseek-v4\b(?!-flash|-pro)/.test(n)) return "pro";
-  if (/flash\b|mini\b|haiku\b|turbo\b|fast\b|small\b|deepseek-v3\b/.test(n)) return "flash";
-  if (/nano\b|lite\b|mini-mini\b|air\b|qwen-turbo\b/.test(n)) return "lite";
+  if (/gpt-6-astra|opus|sonnet\s*5|gpt-5(\.5)?\b|gpt-4\b|qwen-max|deepseek-v4-pro|deepseek-r1|reasoner|thinking|pro$|hi$|high$/.test(n)) return "flagship";
+  if (/gpt-6\.1-sol|pro\b|plus\b|3-5\b|deepseek-v4\b(?!-flash|-pro)/.test(n)) return "pro";
+  if (/gpt-6\.1-terra|flash\b|mini\b|haiku\b|turbo\b|fast\b|small\b|deepseek-v3\b/.test(n)) return "flash";
+  if (/gpt-6-luna|nano\b|lite\b|mini-mini\b|air\b|qwen-turbo\b/.test(n)) return "lite";
   return "default";
 }
 
 /** 从 name/id 启发式识别 strengths（未显式标注时）。 */
-function guessStrengthsFromName(name: string, _provider: ProviderConfig): Array<"code" | "reason" | "vision" | "tools" | "chat" | "long"> {
+function guessStrengthsFromName(name: string, provider: ProviderConfig): Array<"code" | "reason" | "vision" | "tools" | "chat" | "long"> {
   const n = name.toLowerCase();
   const s = new Set<"code" | "reason" | "vision" | "tools" | "chat" | "long">();
   if (/code|coder|codex|kimi-k2|qwen-coder|deepseek-coder|devstral/.test(n)) s.add("code");
-  if (/reason|thinking|pro|opus|deepseek-r1|qwen-qwq|o1|o3|math|qwq/.test(n)) s.add("reason");
-  if (/vision|vl|gpt-4o|sonnet|gemini|qwen-vl|see|look|image|flash-lite|grounding/.test(n)) s.add("vision");
+  if (/reason|thinking|pro|opus|deepseek-r1|qwen-qwq|o1|o3|math|qwq|gpt-6/.test(n)) s.add("reason");
+  if (/vision|vl|gpt-4o|gpt-6|sonnet|gemini|qwen-vl|see|look|image|flash-lite|grounding/.test(n)) s.add("vision");
   if (/tools|tool|function|agent|claude|codex|gpt-5\b|qwen-max|deepseek-v4/.test(n)) s.add("tools");
-  if (/long|200k|1m|1mo|claude|gemini|opus|qwen-long/.test(n)) s.add("long");
+  if (/long|200k|1m|1mo|claude|gemini|opus|qwen-long|gpt-6/.test(n)) s.add("long");
+
+  // Explicit capability declarations refine (and can negate) name-based hints.
+  const model = provider.models.find((entry) => entry.id === name);
+  const capabilities = { ...(provider.capabilities ?? {}), ...(model?.capabilities ?? {}) };
+  const applyCapability = (field: "reasoning" | "vision" | "tools", strength: "reason" | "vision" | "tools") => {
+    if (capabilities[field] === true) s.add(strength);
+    else if (capabilities[field] === false) s.delete(strength);
+  };
+  applyCapability("reasoning", "reason");
+  applyCapability("vision", "vision");
+  applyCapability("tools", "tools");
+  if (capabilities.inputModalities?.includes("image")) s.add("vision");
+  if ((capabilities.contextWindow ?? provider.contextWindow ?? 0) >= 200_000) s.add("long");
   if (s.size === 0) s.add("chat");
-  // 兜底：所有都必备 chat
   s.add("chat");
   return Array.from(s);
 }
