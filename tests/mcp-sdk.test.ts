@@ -99,7 +99,7 @@ test("MCP SDK v2: modern Streamable HTTP negotiates 2026-07-28 and preserves too
     assert.equal(await connection.readResource("fixture://readme"), "modern resource body");
     assert.match(await connection.getPrompt("explain", { topic: "sdk" }), /Explain MCP SDK v2/);
   } finally {
-    connection.dispose();
+    await connection.close();
     await closeServer(server);
   }
 });
@@ -145,7 +145,7 @@ test("MCP SDK v2: legacy stdio servers remain compatible and environment inherit
     assert.match(output, /explicit-config-value/);
     assert.match(output, /"secret":null/);
   } finally {
-    connection.dispose();
+    await connection.close();
     if (previousSecret === undefined) delete process.env.FREESEEK_TEST_SECRET;
     else process.env.FREESEEK_TEST_SECRET = previousSecret;
   }
@@ -195,7 +195,7 @@ test("MCP SDK v2: old SSE-only endpoints use the legacy SSE transport after a 40
     assert.deepEqual(connection.tools.map((tool) => tool.name), ["sse_lookup"]);
     assert.match(await connection.callTool("mcp__sse__sse_lookup", {}), /legacy-sse-result/);
   } finally {
-    connection.dispose();
+    await connection.close();
     for (const stream of streams) stream.end();
     await closeServer(server);
   }
@@ -214,7 +214,7 @@ test("MCP SDK v2: authentication failures never downgrade to legacy SSE", async 
     await assert.rejects(() => connection.connect(), /401|authorization|Unauthorized/i);
     assert.equal(sseConnections, 0);
   } finally {
-    connection.dispose();
+    await connection.close();
     await closeServer(server);
   }
 });
