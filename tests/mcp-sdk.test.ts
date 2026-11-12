@@ -119,7 +119,7 @@ test("MCP SDK v2: legacy stdio servers remain compatible and environment inherit
       if (message.method === "server/discover") {
         process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "Method not found" } }) + "\n");
       } else if (message.method === "initialize") {
-        reply(message.id, { protocolVersion: "2025-11-25", capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: "legacy-fixture", version: "1.0.0" } });
+        reply(message.id, { protocolVersion: "2025-11-25", capabilities: {}, serverInfo: { name: "legacy-fixture", version: "1.0.0" } });
       } else if (message.method === "tools/list") {
         reply(message.id, { tools: [{ name: "env_probe", description: "Check child environment", inputSchema: { type: "object", properties: {} } }] });
       } else if (message.method === "resources/list") {
