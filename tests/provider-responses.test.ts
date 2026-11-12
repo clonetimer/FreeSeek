@@ -306,3 +306,75 @@ test("Responses assistant state is preserved by local EventLog message projectio
   assert.equal(logged.message.responses_phase, "final_answer");
   assert.deepEqual(logged.message.responses_output_items, message.responses_output_items);
 });
+
+test("Responses stream reconstructs incomplete output items when final response omits output", async () => {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    const message = {
+      type: "message",
+      id: "msg_partial",
+      role: "assistant",
+      content: [{ type: "output_text", text: "Partial answer" }],
+    };
+    const call = {
+      type: "function_call",
+      id: "fc_partial",
+      call_id: "call_partial",
+      name: "read_file",
+      arguments: '{"path":"README.md"}',
+    };
+    sse(res, { type: "response.output_item.done", output_index: 0, item: message });
+    sse(res, { type: "response.output_item.done", output_index: 1, item: call });
+    sse(res, {
+      type: "response.incomplete",
+      response: {
+        id: "resp_partial",
+        status: "incomplete",
+        incomplete_details: { reason: "max_output_tokens" },
+        usage: { input_tokens: 10, output_tokens: 20, total_tokens: 30 },
+      },
+    });
+    res.end();
+  });
+  const endpoint = await listen(server);
+  const cfg = buildResolvedConfig(provider({ baseUrl: endpoint.slice(0, -"/responses".length) }), "gpt-6.1-sol");
+  const streamedText: string[] = [];
+  try {
+    const result = await streamResponses(cfg, [{ role: "user", content: "Read README." }], [tool], {
+      onText: (delta) => streamedText.push(delta),
+    });
+    assert.equal(result.finishReason, "length");
+    assert.equal(result.message.content, "Partial answer");
+    assert.deepEqual(streamedText, ["Partial answer"]);
+    assert.equal(result.message.tool_calls?.[0].id, "call_partial");
+    assert.equal((result.message.responses_output_items?.[0] as any).id, "msg_partial");
+  } finally {
+    await close(server);
+  }
+});
+
+test("Responses stream surfaces structured errors from SSE error events", async () => {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    sse(res, {
+      type: "error",
+      error: { message: "model is not available for this project", code: "model_not_found" },
+    });
+    res.end();
+  });
+  const endpoint = await listen(server);
+  const cfg = buildResolvedConfig(provider({ baseUrl: endpoint.slice(0, -"/responses".length) }), "missing-model");
+  try {
+    await assert.rejects(
+      () => streamResponses(cfg, [{ role: "user", content: "hello" }], [], { onText: () => {} }),
+      (error: any) => {
+        assert.match(error.message, /model is not available for this project/);
+        assert.equal(error.code, "model_not_found");
+        return true;
+      }
+    );
+  } finally {
+    await close(server);
+  }
+});
+
