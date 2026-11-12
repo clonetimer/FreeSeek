@@ -154,7 +154,7 @@ export function buildResponsesBody(
       ? cfg.extraBody.include.filter((item): item is string => typeof item === "string")
       : []
   );
-  if (cfg.capabilities.reasoning !== false) include.add("reasoning.encrypted_content");
+  if (cfg.capabilities.reasoning === true) include.add("reasoning.encrypted_content");
   const requestedTemperature = extra.temperature;
   delete extra.temperature;
 
