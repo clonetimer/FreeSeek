@@ -28,11 +28,11 @@ test("resolveSafe: 拒绝 .. 字符串越界", () => {
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-// Windows 非管理员创建符号链接会 EPERM，跳过软链接用例（CI/本机若无特权则不测该项）。
+// Windows 使用 junction 创建目录链接，避免把 POSIX 的 /etc 路径误当成 Windows 绝对路径。
 function canSymlink(dir: string): boolean {
   try {
     const probe = path.join(dir, "probe_link");
-    fs.symlinkSync(".", probe);
+    fs.symlinkSync(dir, probe, process.platform === "win32" ? "junction" : "dir");
     fs.rmSync(probe, { force: true });
     return true;
   } catch {
@@ -42,13 +42,17 @@ function canSymlink(dir: string): boolean {
 
 test("resolveSafe: 拒绝软链接指向工作区外（symlink 逃逸）", (t) => {
   const root = tmpRoot();
+  const outside = tmpRoot();
   try {
     if (!canSymlink(root)) { t.skip("当前环境无符号链接创建权限，跳过"); return; }
-    // 工作区内建一个指向 /etc（工作区外）的软链接
+    // 创建真实存在的工作区外目录，确保 Windows junction 与 POSIX symlink 都指向有效目标。
     const link = path.join(root, "escape_link");
-    fs.symlinkSync("/etc", link);
+    fs.symlinkSync(outside, link, process.platform === "win32" ? "junction" : "dir");
     assert.throws(() => resolveSafe(root, "escape_link/passwd"), /符号链接解析|路径越界/);
-  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
 });
 
 test("resolveSafe: 软链接指向工作区内仍允许", (t) => {
