@@ -64,7 +64,11 @@ test("resolveSafe: 软链接指向工作区内仍允许", (t) => {
     const link = path.join(root, "to_inner");
     fs.symlinkSync(inner, link);
     const resolved = resolveSafe(root, "to_inner/file.txt");
-    assert.ok(resolved.startsWith(root), "应仍位于工作区内");
+    const canonicalRoot = fs.realpathSync(root);
+    assert.ok(
+      resolved.startsWith(canonicalRoot + path.sep),
+      "解析结果应位于规范化后的工作区内"
+    );
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
