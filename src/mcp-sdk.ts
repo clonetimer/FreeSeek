@@ -12,7 +12,6 @@ import {
   SSEClientTransport,
   StreamableHTTPClientTransport,
   type CallToolRequestOptions,
-  type RequestOptions,
 } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
@@ -54,7 +53,7 @@ export function buildMcpEnv(extra?: Record<string, string>): Record<string, stri
  * legacy SSE-only MCP server. Authentication, authorization, server errors,
  * timeouts and network failures must never trigger a transport downgrade.
  */
-export function isLegacySseFallbackError(error: unknown): boolean {
+export function isLegacySseFallbackError(error: unknown): error is SdkHttpError {
   if (!(error instanceof SdkHttpError)) return false;
   return [404, 405, 406, 415].includes(error.status);
 }
@@ -286,8 +285,8 @@ export class McpConnection {
     try {
       const result = await this.requireClient().readResource({ uri }, { signal: requestSignal(signal) });
       return (result.contents ?? []).map((item) => {
-        if (typeof item.text === "string") return item.text;
-        if (typeof item.blob === "string") {
+        if ("text" in item && typeof item.text === "string") return item.text;
+        if ("blob" in item && typeof item.blob === "string") {
           return `[resource ${item.uri}: ${item.mimeType ?? "binary"}, base64 ${item.blob.length} chars]`;
         }
         return JSON.stringify(item);
