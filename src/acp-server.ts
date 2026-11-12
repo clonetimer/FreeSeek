@@ -92,7 +92,7 @@ function parseArgs(argv: string[]): AcpCliArgs | { help: true } {
     baseUrl: process.env.FREESEEK_BASE_URL ?? "",
     apiKey: process.env.FREESEEK_API_KEY ?? "",
     model: process.env.FREESEEK_MODEL ?? "",
-    format: (["openai", "claude", "gemini"] as const).includes(process.env.FREESEEK_FORMAT as any)
+    format: (["openai", "responses", "claude", "gemini"] as const).includes(process.env.FREESEEK_FORMAT as any)
       ? process.env.FREESEEK_FORMAT as ProviderFormat : "openai",
     toolMode: (["native", "react"] as const).includes(process.env.FREESEEK_TOOL_MODE as any)
       ? process.env.FREESEEK_TOOL_MODE as "native" | "react" : "native",
