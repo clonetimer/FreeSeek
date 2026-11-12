@@ -60,8 +60,11 @@ export async function streamChat(
   const cfg = override
     ? resolveConfigFor(override, profile, messages)
     : resolveActiveConfig(profile, messages);
-  if (cfg.capabilities.vision === false && messages.some((message) => message.images?.length)) {
-    throw new Error(`Model "${cfg.model}" is configured without vision capability but the conversation contains images.`);
+  const hasImages = messages.some((message) => message.images?.length);
+  const inputModalitiesExcludeImages = !!cfg.capabilities.inputModalities?.length &&
+    !cfg.capabilities.inputModalities.includes("image");
+  if (hasImages && (cfg.capabilities.vision === false || inputModalitiesExcludeImages)) {
+    throw new Error(`Model "${cfg.model}" is configured without image-input capability but the conversation contains images.`);
   }
   if (!cfg.apiKey && cfg.authType !== "none") {
     const hint =
