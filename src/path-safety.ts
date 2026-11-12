@@ -23,32 +23,31 @@ function assertWithin(rootReal: string, real: string, original: string): void {
 export function resolveSafe(root: string, p: string): string {
   const rootReal = safeRealpath(root);
   const abs = path.isAbsolute(p) ? path.resolve(p) : path.resolve(rootReal, p);
-  if (isOutside(path.relative(rootReal, abs))) throw new Error(`路径越界，禁止访问工作区外: ${p}`);
-
   let cur = abs;
+  const missingParts: string[] = [];
+
   while (true) {
     try {
       const st = fs.lstatSync(cur);
+      let real: string;
       if (st.isSymbolicLink()) {
-        let linked: string;
-        try { linked = fs.realpathSync(cur); }
+        try { real = fs.realpathSync(cur); }
         catch { throw new Error(`路径包含悬空符号链接，拒绝访问: ${p}`); }
-        assertWithin(rootReal, linked, p);
-        if (cur === abs) return linked;
-        break;
+      } else {
+        real = fs.realpathSync(cur);
       }
-      const real = fs.realpathSync(cur);
+      // Compare canonical paths. macOS commonly exposes /var as a symlink to /private/var;
+      // lexical comparison before realpath incorrectly rejects valid paths under the same root.
       assertWithin(rootReal, real, p);
-      if (cur === abs) return real;
-      break;
+      return path.resolve(real, ...missingParts);
     } catch (e: any) {
       if (e?.message?.startsWith("路径")) throw e;
       const parent = path.dirname(cur);
       if (parent === cur) throw new Error(`路径解析失败，拒绝访问: ${p}`);
+      missingParts.unshift(path.basename(cur));
       cur = parent;
     }
   }
-  return abs;
 }
 
 /** Resolve one path against the primary workspace plus explicitly authorized additional roots.
