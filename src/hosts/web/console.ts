@@ -215,15 +215,37 @@ export class WebConsoleServer {
     this.server = null;
     this.connection?.close("web-console-shutdown");
     this.connection = null;
-    if (this.child && this.child.exitCode === null) {
+    if (this.child && this.child.exitCode === null && this.child.signalCode === null) {
       const child = this.child;
-      const exited = new Promise<void>((resolve) => {
-        const timer = setTimeout(() => resolve(), 2000);
-        child.once("exit", () => { clearTimeout(timer); resolve(); });
+      const waitForClose = (timeoutMs: number): Promise<boolean> => new Promise((resolve) => {
+        if (child.stdout.destroyed && child.stderr.destroyed) { resolve(true); return; }
+        const onClose = (): void => { clearTimeout(timer); resolve(true); };
+        const timer = setTimeout(() => {
+          child.off("close", onClose);
+          resolve(false);
+        }, timeoutMs);
+        child.once("close", onClose);
       });
-      child.kill("SIGTERM");
-      // Windows 下必须等子进程完全退出、文件句柄释放，否则目录删除会 EPERM
-      await exited;
+
+      // ACP server waits for stdin EOF before its graceful close completes.
+      // Sending SIGTERM first leaves the POSIX sidecar waiting on peer.waitForClose().
+      try { child.stdin.end(); } catch { /* the sidecar may already have closed stdin */ }
+      let closed = await waitForClose(2000);
+      if (!closed && child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGTERM");
+        closed = await waitForClose(1000);
+      }
+      if (!closed && child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL");
+        closed = await waitForClose(1000);
+      }
+      if (!closed) {
+        // Do not leave parent-side stdio handles keeping the host process alive.
+        child.stdin.destroy();
+        child.stdout.destroy();
+        child.stderr.destroy();
+        this.log("ACP sidecar did not close after EOF/SIGTERM/SIGKILL; stdio handles were released");
+      }
     }
     this.child = null;
     this.markClosed();
