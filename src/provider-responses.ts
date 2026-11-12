@@ -121,7 +121,7 @@ export function buildResponsesBody(
   const maxOutputTokens =
     validPositiveInteger(cfg.extraBody.max_output_tokens) ??
     validPositiveInteger(legacyMaxTokens) ??
-    cfg.capabilities.maxOutputTokens ??
+    validPositiveInteger(cfg.capabilities.maxOutputTokens) ??
     4096;
   const include = new Set<string>(
     Array.isArray(cfg.extraBody.include)
