@@ -1,15 +1,15 @@
 # 多协议 Provider 接入
 
-FreeSeek 通过 Provider 抽象层接入各种 AI 服务，支持 `openai` / `claude` /
-`gemini` 三种协议格式。每种格式会自动构造对应端点、认证头与流式解析。
+FreeSeek 通过 Provider 抽象层接入各种 AI 服务，支持 OpenAI Chat Completions、OpenAI Responses API、Anthropic Messages 和 Gemini generateContent。协议格式由 Provider 明确指定；现有 `openai` 配置继续表示 Chat Completions，不会自动迁移到 Responses。
 
 ## 支持的协议格式
 
-| format | 认证头 | 典型服务 |
-| --- | --- | --- |
-| `openai` | `Authorization: Bearer <key>` | DeepSeek / OpenRouter / 硅基流动 / Kimi / 通义 / 智谱 / 腾讯混元 / OpenAI / Ollama / LM Studio |
-| `claude` | `x-api-key: <key>` + `anthropic-version` | Anthropic Claude |
-| `gemini` | `x-goog-api-key: <key>` | Google Gemini |
+| format | endpoint | 认证头 | 典型服务 |
+| --- | --- | --- | --- |
+| `openai` | `/chat/completions` | `Authorization: Bearer <key>` | DeepSeek / OpenRouter / 硅基流动 / Kimi / 通义 / 智谱 / 腾讯混元 / OpenAI Chat Completions / Ollama / LM Studio |
+| `responses` | `/responses` | `Authorization: Bearer <key>` | OpenAI Responses API |
+| `claude` | `/v1/messages` | `x-api-key: <key>` + `anthropic-version` | Anthropic Claude |
+| `gemini` | `/v1beta/models/:model:generateContent` | `x-goog-api-key: <key>` | Google Gemini |
 
 每个 Provider 项还支持：
 
@@ -17,15 +17,55 @@ FreeSeek 通过 Provider 抽象层接入各种 AI 服务，支持 `openai` / `cl
 - **`extraBody`**：额外请求体透传。
 - **`authType`**：认证方式（`bearer` 等）。
 - **`autoDiscoverModels`**：自动拉取 `/v1/models` 的全部已加载模型（LM Studio / Ollama 本地服务推荐开启，切换模型时实时刷新）。
-- **`toolMode`**：`native`（原生 function calling）或 `react`（ReAct 文本协议）。
+- **`toolMode`**：`native`（原生 function calling）或 `react`（ReAct 文本协议）。模型显式声明 `capabilities.tools:false` 时自动降为 ReAct。
+- **`capabilities`**：Provider 级默认能力声明，模型条目可用自己的 `capabilities` 覆盖。支持 `tools`、`vision`、`reasoning`、`structuredOutput`、`promptCaching`、`contextWindow`、`maxOutputTokens`、`inputModalities`、`outputModalities`。未声明表示 unknown，不会根据模型名称推断。
+- **`storeResponses`**：仅对 `responses` 格式有效，默认 `false`。设为 `true` 才允许 OpenAI 服务端存储 Response 对象。
+
+## Responses API 的本地优先策略
+
+Responses adapter 使用 typed input/output items 和语义化 SSE 事件。FreeSeek 将工具调用映射为 `function_call` / `function_call_output`，实际执行仍由共享 ToolRuntime 负责。
+
+- 默认发送 `store:false`，不使用远端 `conversation` 或 `previous_response_id`；本地 EventLog 是会话历史的唯一来源。
+- 请求 `reasoning.encrypted_content`，并将需要续接的原始 output items 本地持久化，以支持无服务端状态存储的多轮推理。
+- 只有显式设置 `storeResponses:true` 才允许服务端存储 Response 对象。
+- `max_tokens` 会兼容映射为 Responses API 的 `max_output_tokens`；不透传 Chat Completions 的 `messages` 和 `stream_options` 字段。
+
+示例：
+
+```json
+{
+  "id": "openai-responses",
+  "name": "OpenAI Responses",
+  "baseUrl": "https://api.openai.com/v1",
+  "apiKey": "${env:OPENAI_API_KEY}",
+  "format": "responses",
+  "toolMode": "native",
+  "storeResponses": false,
+  "capabilities": {
+    "tools": true,
+    "vision": true,
+    "reasoning": true,
+    "structuredOutput": true,
+    "contextWindow": 1050000,
+    "maxOutputTokens": 128000,
+    "inputModalities": ["text", "image"],
+    "outputModalities": ["text"]
+  },
+  "models": [
+    {
+      "id": "gpt-6.1-sol"
+    }
+  ]
+}
+```
 
 ## 预设服务商
 
-「添加提供商」向导（命令 `FreeSeek: 添加提供商`）提供 10 个常见预设，自动填充
+「添加提供商」向导（命令 `FreeSeek: 添加提供商`）提供常见预设，自动填充
 Base URL / 协议格式 / 认证方式 / 模型：
 
-DeepSeek / OpenRouter / 硅基流动 / Kimi / 通义 / 智谱 / 腾讯混元 / OpenAI /
-Ollama / LM Studio。仅「自定义」需要手动填写。
+DeepSeek / OpenRouter / 硅基流动 / Kimi / 通义 / 智谱 / 腾讯混元 /
+OpenAI Responses / OpenAI Chat Completions / Ollama / LM Studio。仅「自定义」需要手动填写。
 
 - 选预设后，API Key 输入框自动填入对应的 `${env:}` 环境变量引用。
 - 保存后自动调用 `/models` 探测服务可达性与鉴权有效性并反馈结果。
