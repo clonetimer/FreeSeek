@@ -1,4 +1,4 @@
-// check:max-lines 800 (待拆分：runAgent 内 budget/context 状态机拆出后减小；v0.17.6 加固重复检测 + normalizeArgsKey 后行数上升，v0.17.8 加 STREAM_IDLE_MS 常量 + truncateToolResult 串联后上升，v0.17.16 todo 分解 nudge 再升)
+// check:max-lines 810 (P3 Responses 输出项本地状态投影接入；待拆分 runAgent 内 budget/context 状态机后减小；v0.17.6 加固重复检测 + normalizeArgsKey 后行数上升，v0.17.8 加 STREAM_IDLE_MS 常量 + truncateToolResult 串联后上升，v0.17.16 todo 分解 nudge 再升)
 /**
  * Agent 主循环：模型可连续发起工具调用，本函数负责执行并把结果回灌给模型。
  * 共享类型见 agent-types.ts，命名子智能体注册表见 agent-registry.ts，
