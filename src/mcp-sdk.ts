@@ -21,6 +21,36 @@ export interface McpSdkLogSink {
   warn?(message: string): void;
 }
 
+interface McpToolRecord {
+  name: string;
+  description?: string;
+  inputSchema?: any;
+}
+
+interface McpResourceRecord {
+  uri: string;
+  name?: string;
+  description?: string;
+}
+
+interface McpPromptRecord {
+  name: string;
+  description?: string;
+  arguments?: any[];
+}
+
+interface McpResourceContent {
+  uri: string;
+  mimeType?: string;
+  text?: string;
+  blob?: string;
+}
+
+interface McpPromptMessage {
+  role: string;
+  content: any;
+}
+
 const MCP_CONNECT_TIMEOUT_MS = 15_000;
 const MCP_REQUEST_TIMEOUT_MS = 120_000;
 const MCP_ENV_ALLOWLIST = [
@@ -118,12 +148,12 @@ export class McpConnection {
         defaultCacheTtlMs: 0,
         listChanged: {
           tools: {
-            onChanged: (error, tools) => {
+            onChanged: (error: unknown, tools: readonly McpToolRecord[] | undefined) => {
               if (error) {
                 this.log.warn?.(`[FreeSeek MCP] ${this.name} tools/list_changed refresh failed: ${describeError(error)}`);
                 return;
               }
-              this.tools = (tools ?? []).map((tool) => ({
+              this.tools = (tools ?? []).map((tool: McpToolRecord) => ({
                 name: tool.name,
                 description: tool.description ?? "",
                 inputSchema: tool.inputSchema ?? { type: "object", properties: {} },
@@ -131,12 +161,12 @@ export class McpConnection {
             },
           },
           resources: {
-            onChanged: (error, resources) => {
+            onChanged: (error: unknown, resources: readonly McpResourceRecord[] | undefined) => {
               if (error) {
                 this.log.warn?.(`[FreeSeek MCP] ${this.name} resources/list_changed refresh failed: ${describeError(error)}`);
                 return;
               }
-              this.resources = (resources ?? []).map((resource) => ({
+              this.resources = (resources ?? []).map((resource: McpResourceRecord) => ({
                 uri: resource.uri,
                 name: resource.name ?? resource.uri,
                 description: resource.description ?? undefined,
@@ -144,12 +174,12 @@ export class McpConnection {
             },
           },
           prompts: {
-            onChanged: (error, prompts) => {
+            onChanged: (error: unknown, prompts: readonly McpPromptRecord[] | undefined) => {
               if (error) {
                 this.log.warn?.(`[FreeSeek MCP] ${this.name} prompts/list_changed refresh failed: ${describeError(error)}`);
                 return;
               }
-              this.prompts = (prompts ?? []).map((prompt) => ({
+              this.prompts = (prompts ?? []).map((prompt: McpPromptRecord) => ({
                 name: prompt.name,
                 description: prompt.description ?? undefined,
                 arguments: prompt.arguments ?? undefined,
@@ -174,20 +204,20 @@ export class McpConnection {
     // existing legacy servers omit capabilities.tools/resources/prompts while
     // still implementing the corresponding list methods. Preserve FreeSeek's
     // previous best-effort behavior only for negotiated legacy connections.
-    const tools = client.getProtocolEra() === "legacy" && !client.getServerCapabilities()?.tools
+    const tools = (client.getProtocolEra() === "legacy" && !client.getServerCapabilities()?.tools
       ? await client.request({ method: "tools/list" }, { signal: toolsSignal })
-      : await client.listTools(undefined, { signal: toolsSignal });
-    this.tools = (tools.tools ?? []).map((tool) => ({
+      : await client.listTools(undefined, { signal: toolsSignal })) as { tools?: McpToolRecord[] };
+    this.tools = (tools.tools ?? []).map((tool: McpToolRecord) => ({
       name: tool.name,
       description: tool.description ?? "",
       inputSchema: tool.inputSchema ?? { type: "object", properties: {} },
     }));
     try {
       const signal = AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS);
-      const result = client.getProtocolEra() === "legacy" && !client.getServerCapabilities()?.resources
+      const result = (client.getProtocolEra() === "legacy" && !client.getServerCapabilities()?.resources
         ? await client.request({ method: "resources/list" }, { signal })
-        : await client.listResources(undefined, { signal });
-      this.resources = (result.resources ?? []).map((resource) => ({
+        : await client.listResources(undefined, { signal })) as { resources?: McpResourceRecord[] };
+      this.resources = (result.resources ?? []).map((resource: McpResourceRecord) => ({
         uri: resource.uri,
         name: resource.name ?? resource.uri,
         description: resource.description ?? undefined,
@@ -197,10 +227,10 @@ export class McpConnection {
     }
     try {
       const signal = AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS);
-      const result = client.getProtocolEra() === "legacy" && !client.getServerCapabilities()?.prompts
+      const result = (client.getProtocolEra() === "legacy" && !client.getServerCapabilities()?.prompts
         ? await client.request({ method: "prompts/list" }, { signal })
-        : await client.listPrompts(undefined, { signal });
-      this.prompts = (result.prompts ?? []).map((prompt) => ({
+        : await client.listPrompts(undefined, { signal })) as { prompts?: McpPromptRecord[] };
+      this.prompts = (result.prompts ?? []).map((prompt: McpPromptRecord) => ({
         name: prompt.name,
         description: prompt.description ?? undefined,
         arguments: prompt.arguments ?? undefined,
@@ -294,8 +324,8 @@ export class McpConnection {
 
   async readResource(uri: string, signal?: AbortSignal): Promise<string> {
     try {
-      const result = await this.requireClient().readResource({ uri }, { signal: requestSignal(signal) });
-      return (result.contents ?? []).map((item) => {
+      const result = await this.requireClient().readResource({ uri }, { signal: requestSignal(signal) }) as { contents?: McpResourceContent[] };
+      return (result.contents ?? []).map((item: McpResourceContent) => {
         if ("text" in item && typeof item.text === "string") return item.text;
         if ("blob" in item && typeof item.blob === "string") {
           return `[resource ${item.uri}: ${item.mimeType ?? "binary"}, base64 ${item.blob.length} chars]`;
@@ -312,8 +342,8 @@ export class McpConnection {
       const result = await this.requireClient().getPrompt(
         { name, arguments: args },
         { signal: requestSignal(signal) }
-      );
-      return (result.messages ?? []).map((message) => {
+      ) as { messages?: McpPromptMessage[] };
+      return (result.messages ?? []).map((message: McpPromptMessage) => {
         const content = message.content as any;
         return `[${message.role}] ${formatContent([content])}`;
       }).join("\n");
