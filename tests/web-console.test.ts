@@ -177,11 +177,14 @@ test("Web Console shutdown closes active SSE responses and clears their heartbea
     assert.equal(response.status, 200);
     reader = response.body!.getReader();
     await reader.read();
-    // Consume the response concurrently: server.close waits for the active HTTP connection to finish.
+    const active = (ctx.server as any).subscribers.get(sessionId) as Set<{ res: import("node:http").ServerResponse }>;
+    assert.equal(active?.size, 1, "the SSE client should be registered before shutdown");
+    const serverResponse = [...active][0].res;
+    // Stop ends the response; cancel the browser reader concurrently so server.close can finish its socket drain.
     const stopping = ctx.server.stop();
-    const end = await reader.read();
+    await reader.cancel();
     await stopping;
-    assert.equal(end.done, true, "server shutdown must end the browser SSE stream");
+    assert.equal(serverResponse.writableEnded, true, "server shutdown must end the browser SSE response");
     assert.equal((ctx.server as any).subscribers.size, 0);
   } finally {
     await reader?.cancel().catch(() => undefined);
