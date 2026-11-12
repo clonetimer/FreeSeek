@@ -61,7 +61,15 @@ try {
   const report = await acp.client({ name: "freesek-official-sdk-interop", version: "2.6.0" })
     .onNotification(acp.methods.client.session.update, context => { updates.push(context.params); })
     .connectWith(stream, async context => {
-      // connectWith performs the stable v1 initialize handshake and validates its response.
+      // The official SDK provides the connection and typed context; the client
+      // still sends the protocol initialize request before using session methods.
+      const initialized = await context.request(acp.methods.agent.initialize, {
+        protocolVersion: acp.PROTOCOL_VERSION,
+        clientCapabilities: {}
+      });
+      assert.equal(initialized.protocolVersion, acp.PROTOCOL_VERSION);
+      assert.equal(initialized.agentCapabilities.loadSession, true);
+      assert.ok(initialized.agentCapabilities.sessionCapabilities.additionalDirectories);
       const created = await context.request(acp.methods.agent.session.new, {
         cwd: workspace,
         additionalDirectories: [extra],
