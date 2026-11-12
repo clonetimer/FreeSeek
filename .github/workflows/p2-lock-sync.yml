@@ -1,0 +1,41 @@
+name: P2 dependency lock sync
+
+on:
+  push:
+    branches:
+      - modernize/p2-acp-sdk-interop-2026-11
+    paths:
+      - package.json
+
+permissions:
+  contents: write
+
+concurrency:
+  group: p2-lock-sync
+  cancel-in-progress: false
+
+jobs:
+  lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Regenerate npm lockfile
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Commit lockfile when changed
+        run: |
+          if git diff --quiet -- package-lock.json; then
+            echo "package-lock.json is already synchronized"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          git commit -m "build: synchronize P2 ACP SDK dependency lockfile"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
