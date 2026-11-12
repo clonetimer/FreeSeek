@@ -12,6 +12,8 @@ FreeSeek 是一个**宿主无关的 Agent Kernel**。VS Code、CLI/Headless、AC
 
 `deepseek-free-api` 网页兼容适配仍可作为**实验性、显式启用的 Provider**使用，但不再定义 FreeSeek 的产品身份；核心架构与其他 Provider 解耦。
 
+**运行环境：** Node.js `>=22.0.0`；VS Code `>=1.101.0`。MCP 接入使用官方 TypeScript SDK v2。
+
 架构与交互形态详见 [docs/product-surfaces.md](docs/product-surfaces.md)，Context Planner 详见 [docs/context-planner.md](docs/context-planner.md)。
 
 ## 0.25.0 Stable — 补齐的 5 项缺口
