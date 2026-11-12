@@ -2,7 +2,10 @@
   "extends": "./tsconfig.check.json",
   "compilerOptions": {
     "noEmit": true,
-    "strict": true
+    "strict": true,
+    "module": "CommonJS",
+    "moduleResolution": "Node10",
+    "ignoreDeprecations": "6.0"
   },
   "include": [
     "src",

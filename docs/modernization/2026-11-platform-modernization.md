@@ -1,12 +1,12 @@
 # FreeSeek 现代化改造路线图（2026 Q4）
 
-> 状态：P0 基线建设进行中  
+> 状态：P0 已合并；P1 MCP SDK v2 迁移进行中  
 > 目标：在保留现有 Agent Kernel、ToolRuntime 和多宿主能力的基础上，把 FreeSeek 从功能堆叠型 Coding Agent 收敛为可维护、协议兼容、安全可控、易于使用的本地优先 AI 开发平台。  
 > 原则：先建立可重复验证的基线，再升级协议和 Provider；不以大规模重写代替架构治理，不为追逐版本号而牺牲兼容性。
 
 ## 1. 当前基线审计
 
-审计对象：`main`，基线提交 `0b0443c19fb807445c5403359326d9ef4d155d43`，版本 `0.26.0`。
+审计对象：P0 基线提交 `0b0443c19fb807445c5403359326d9ef4d155d43`，版本 `0.26.0`；P0 通过独立 PR #1 合并至 main，合并提交 `0355c6508fb78da71eefdf7ccadb7030eac4ac80`。
 
 ### 已有资产（保留并继续复用）
 
@@ -22,7 +22,7 @@
 | --- | --- | --- |
 | CI | 仓库未发现 `.github/workflows` | 建立跨平台、跨 Node LTS 的自动化门禁 |
 | Node.js | `engines.node >=22.0.0`（已更新） | Node 22 / 24 / 26 均通过跨平台 CI；Node 18 不再作为支持基线 |
-| MCP | `src/mcp.ts` 固定使用 `2024-11-05` 初始化握手 | 支持新旧协议协商，不能只改版本字符串 |
+| MCP | P1 分支已新增 `src/mcp-sdk.ts`，采用官方 `@modelcontextprotocol/client` v2.4.0 | 现代协议自动协商、legacy SSE 受控回退、stdio 环境隔离；等待跨平台 CI 验收 |
 | ACP | 当前实现 ACP v1 stdio host | 以稳定 v1 为兼容基线，评估官方 SDK 与新能力；v2 只做实验性并行实现 |
 | Provider | OpenAI Chat Completions、Anthropic Messages、Gemini generateContent | 增加 OpenAI Responses API 适配，保留旧接口与 OpenAI-compatible 服务 |
 | 文档 | 多处产品版本和能力说明不一致 | 以代码、测试和发布证据为准，重建单一能力矩阵 |
@@ -70,7 +70,7 @@ Desktop ─┘                                      │
 3. 每个矩阵执行 `npm ci`、`npm run check`、`npm test`、`npm run smoke`。
 4. 固定本次主干提交与 CI 结果，失败项先分类，不以跳过测试制造绿色结果。
 
-**验收结果：PASS。** 9/9 环境通过：Ubuntu / Windows / macOS × Node 22 / 24 / 26。Linux Node 24 共 538 项测试，522 PASS、16 SKIP、0 FAIL；macOS 的 Linux 专属沙箱能力按平台条件跳过。
+**验收结果：PASS。** PR #1 已合并至 main；冻结标签 `v0.26.0-p0-frozen` 指向合并提交 `0355c6508fb78da71eefdf7ccadb7030eac4ac80`。9/9 环境通过：Ubuntu / Windows / macOS × Node 22 / 24 / 26。Linux Node 24 共 538 项测试，522 PASS、16 SKIP、0 FAIL；macOS 的 Linux 专属沙箱能力按平台条件跳过。
 
 本轮 CI 还修复了三类跨平台问题：
 - Windows 符号链接测试改用真实存在的外部目录与 Junction，避免把 POSIX `/etc` 当成 Windows 路径。
@@ -78,9 +78,9 @@ Desktop ─┘                                      │
 - Web Console 关闭 SSE 心跳计时器，并在 ACP sidecar 关闭时先结束 stdin，让 POSIX 子进程完成 EOF 优雅退出；SIGTERM / SIGKILL 仅作为兜底。
 - 测试运行器固定默认并发为 4，并为单项测试设置 120 秒上限，避免不同 CI runner 并行度差异造成耗时不可控。
 
-### P1 — MCP 协议现代化
+### P1 — MCP 协议现代化（实现中；独立分支 `modernize/p1-mcp-sdk-v2`）
 
-当前 `src/mcp.ts` 固定使用 `2024-11-05` 初始化握手，并自行维护 JSON-RPC、stdio 与 HTTP/SSE 传输。MCP 2026-07-28 规范引入了新的无状态 HTTP、能力发现、MRTR 和订阅机制；官方 TypeScript SDK v2 已稳定发布，支持新协议并提供旧协议版本协商。
+P1 分支已将 MCP 连接执行层迁移至官方 `@modelcontextprotocol/client` v2.4.0。原 `McpManager`、工具命名与 Agent ToolRuntime 路由保持不变；新 adapter 使用 SDK 处理 JSON-RPC、stdio / Streamable HTTP / SSE、协议协商、分页、取消与 list-changed 通知。SDK v2 实现 MCP 2026-07-28 规范，并提供旧协议版本协商。
 
 实施顺序：
 
@@ -89,8 +89,12 @@ Desktop ─┘                                      │
 3. 覆盖 stdio、Streamable HTTP、旧 SSE 服务；HTTP 认证与 legacy fallback 必须区分 401/403 和真正的 transport 不兼容，不能错误降级。
 4. 支持新协议的能力发现、请求元数据、`resultType`、MRTR 输入往返与订阅；保留旧协议服务兼容。
 5. 以官方 SDK v2 server fixture、MCP Inspector 和独立客户端建立新旧协议互操作测试。
-6. MCP SDK v2 要求 TypeScript 6.0 或更新版本；将 TypeScript、Node 类型和构建工具升级纳入同一依赖兼容批次。
+6. MCP SDK v2 要求 TypeScript 6.0 或更新版本；P1 已升级 TypeScript 6、Node 22 类型与 VS Code API 类型，并将类型检查切换为 Bundler resolution，以保留当前 ESM/CJS 混合构建。最低运行环境同步提升为 Node.js 22、VS Code 1.101。
 7. 更新 MCP 管理界面：显示协商版本、传输、能力、连接状态、工具与资源缓存状态。
+
+**当前实现：** 新增 `src/mcp-sdk.ts` 官方 SDK adapter，`McpManager` / ToolRuntime 路由契约保持不变；已接入 stdio、Streamable HTTP 自动协商与 legacy SSE 受控回退，包含工具/资源/Prompt、list-changed、请求超时与取消。Node 22+、TypeScript 6、VS Code 1.101+ 运行时基线已对齐。
+
+**当前专项测试：** 已新增现代 Streamable HTTP、旧 stdio、旧 SSE-only、认证失败不降级、环境变量白名单等回归测试。跨平台 CI 正在验证；只有全部受支持环境通过，P1 才能收尾。
 
 **验收：** 新旧 MCP 服务均可连接；工具、资源、提示词、取消、超时、错误与权限审批均有测试；旧服务失败不会拖垮内置工具。
 
