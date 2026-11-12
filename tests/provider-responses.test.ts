@@ -145,6 +145,12 @@ test("Responses request defaults to stateless storage and maps max_tokens to max
   assert.equal((body.tools as any[])[0].strict, false);
 });
 
+test("Responses omits encrypted reasoning include for models explicitly without reasoning", () => {
+  const cfg = buildResolvedConfig(provider({ capabilities: { reasoning: false } }), "gpt-6.1-sol");
+  const body = buildResponsesBody(cfg, [{ role: "user", content: "hello" }], []);
+  assert.deepEqual(body.include, []);
+});
+
 test("Responses server-side storage requires explicit provider opt-in", () => {
   const cfg = buildResolvedConfig(provider({ storeResponses: true }), "gpt-6.1-sol");
   const body = buildResponsesBody(cfg, [{ role: "user", content: "hello" }], []);
@@ -258,7 +264,7 @@ test("Responses non-streaming helper reads output_text and keeps storage disable
     assert.equal(result, "## Summary\nA compact summary.");
     assert.equal(requestBody.store, false);
     assert.equal(requestBody.stream, false);
-    assert.equal(requestBody.temperature, 0.2);
+    assert.equal(requestBody.temperature, undefined);
     assert.equal(requestBody.input[0].role, "system");
   } finally {
     await close(server);
