@@ -27,6 +27,7 @@ export interface WebConsoleOptions {
 
 interface SseSubscriber {
   res: http.ServerResponse;
+  keepalive: NodeJS.Timeout;
 }
 
 function readVersion(): string {
@@ -204,7 +205,10 @@ export class WebConsoleServer {
 
   async stop(): Promise<void> {
     for (const subs of this.subscribers.values()) {
-      for (const sub of subs) sub.res.end();
+      for (const sub of subs) {
+        clearInterval(sub.keepalive);
+        if (!sub.res.destroyed && !sub.res.writableEnded) sub.res.end();
+      }
     }
     this.subscribers.clear();
     if (this.server) await new Promise<void>((resolve) => this.server!.close(() => resolve()));
@@ -398,18 +402,26 @@ export class WebConsoleServer {
           connection: "keep-alive",
         });
         res.write(": connected\n\n");
-        const sub: SseSubscriber = { res };
         let subs = this.subscribers.get(sessionId);
         if (!subs) { subs = new Set(); this.subscribers.set(sessionId, subs); }
-        subs.add(sub);
         const keepalive = setInterval(() => {
           try { res.write(": ping\n\n"); } catch { /* connection already gone */ }
         }, 15000);
-        req.on("close", () => {
+        const sub: SseSubscriber = { res, keepalive };
+        subs.add(sub);
+        let cleaned = false;
+        const cleanup = (): void => {
+          if (cleaned) return;
+          cleaned = true;
           clearInterval(keepalive);
           subs!.delete(sub);
           if (subs!.size === 0) this.subscribers.delete(sessionId);
-        });
+        };
+        // IncomingMessage.close describes request completion, not the lifetime of the SSE response.
+        // Use the response lifecycle so client disconnects and server shutdown both release the timer.
+        res.once("close", cleanup);
+        res.once("finish", cleanup);
+        req.once("aborted", cleanup);
         return;
       }
       this.json(res, 404, { error: "not found" });
