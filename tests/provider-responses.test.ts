@@ -133,6 +133,7 @@ test("Responses rejects images when declared input modalities exclude image", ()
 
 test("Responses request defaults to stateless storage and maps max_tokens to max_output_tokens", () => {
   const cfg = buildResolvedConfig(provider({
+    capabilities: { reasoning: true },
     extraBody: {
       max_tokens: 8192,
       previous_response_id: "must-not-leak",
@@ -153,6 +154,12 @@ test("Responses request defaults to stateless storage and maps max_tokens to max
   assert.equal(body.max_tokens, undefined);
   assert.deepEqual(body.include, ["reasoning.encrypted_content"]);
   assert.equal((body.tools as any[])[0].strict, false);
+});
+
+test("Responses leaves reasoning encryption unknown unless capability is declared", () => {
+  const cfg = buildResolvedConfig(provider(), "custom-responses-model");
+  const body = buildResponsesBody(cfg, [{ role: "user", content: "hello" }], []);
+  assert.deepEqual(body.include, []);
 });
 
 test("Responses omits encrypted reasoning include for models explicitly without reasoning", () => {
@@ -256,7 +263,10 @@ test("Responses streaming parses text, reasoning, function calls, encrypted outp
     res.end("data: [DONE]\n\n");
   });
   const endpoint = await listen(server);
-  const cfg = buildResolvedConfig(provider({ baseUrl: endpoint.slice(0, -"/responses".length) }), "gpt-6.1-sol");
+  const cfg = buildResolvedConfig(provider({
+    baseUrl: endpoint.slice(0, -"/responses".length),
+    capabilities: { reasoning: true },
+  }), "gpt-6.1-sol");
   const text: string[] = [];
   const reasoning: string[] = [];
   const calls: any[] = [];
@@ -270,6 +280,7 @@ test("Responses streaming parses text, reasoning, function calls, encrypted outp
     });
     assert.equal(auth, "Bearer test-key");
     assert.equal(requestBody.store, false);
+    assert.deepEqual(requestBody.include, ["reasoning.encrypted_content"]);
     assert.equal(requestBody.input[0].content, "Read README.");
     assert.equal(text.join(""), "Reading the file.");
     assert.equal(reasoning.join(""), "I should inspect the file first.");
