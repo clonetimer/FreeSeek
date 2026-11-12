@@ -21,7 +21,7 @@
 | 领域 | 当前基线 | 改造判断 |
 | --- | --- | --- |
 | CI | 仓库未发现 `.github/workflows` | 建立跨平台、跨 Node LTS 的自动化门禁 |
-| Node.js | `engines.node >=18` | Node 18 已 EOL；验证 Node 22/24/26 后更新运行时支持声明 |
+| Node.js | `engines.node >=22.0.0`（已更新） | Node 22 / 24 / 26 均通过跨平台 CI；Node 18 不再作为支持基线 |
 | MCP | `src/mcp.ts` 固定使用 `2024-11-05` 初始化握手 | 支持新旧协议协商，不能只改版本字符串 |
 | ACP | 当前实现 ACP v1 stdio host | 以稳定 v1 为兼容基线，评估官方 SDK 与新能力；v2 只做实验性并行实现 |
 | Provider | OpenAI Chat Completions、Anthropic Messages、Gemini generateContent | 增加 OpenAI Responses API 适配，保留旧接口与 OpenAI-compatible 服务 |
@@ -63,27 +63,33 @@ Desktop ─┘                                      │
 
 ## 3. 分阶段改造
 
-### P0 — 可验证基线（当前批次）
+### P0 — 可验证基线（已完成）
 
 1. 新增 GitHub Actions CI。
 2. 验证 Linux / Windows / macOS 与 Node 22 / 24 / 26。
 3. 每个矩阵执行 `npm ci`、`npm run check`、`npm test`、`npm run smoke`。
 4. 固定本次主干提交与 CI 结果，失败项先分类，不以跳过测试制造绿色结果。
 
-**验收：** 9 组环境结果可追溯；平台能力缺失导致的 skip 必须有明确原因；任何新增失败都形成可复现记录。
+**验收结果：PASS。** 9/9 环境通过：Ubuntu / Windows / macOS × Node 22 / 24 / 26。Linux Node 24 共 538 项测试，522 PASS、16 SKIP、0 FAIL；macOS 的 Linux 专属沙箱能力按平台条件跳过。
+
+本轮 CI 还修复了三类跨平台问题：
+- Windows 符号链接测试改用真实存在的外部目录与 Junction，避免把 POSIX `/etc` 当成 Windows 路径。
+- 路径安全检查先规范化真实路径，再判断授权根目录；修复 macOS `/var → /private/var` 别名导致的合法路径误拒绝。
+- Web Console 关闭 SSE 心跳计时器，并在 ACP sidecar 关闭时先结束 stdin，让 POSIX 子进程完成 EOF 优雅退出；SIGTERM / SIGKILL 仅作为兜底。
+- 测试运行器固定默认并发为 4，并为单项测试设置 120 秒上限，避免不同 CI runner 并行度差异造成耗时不可控。
 
 ### P1 — MCP 协议现代化
 
-当前 MCP 客户端仍按 `2024-11-05` 初始化流程工作。2026-07-28 规范对 HTTP 无状态化、初始化握手、能力发现、MRTR 和订阅机制均有重大调整。
+当前 `src/mcp.ts` 固定使用 `2024-11-05` 初始化握手，并自行维护 JSON-RPC、stdio 与 HTTP/SSE 传输。MCP 2026-07-28 规范引入了新的无状态 HTTP、能力发现、MRTR 和订阅机制；官方 TypeScript SDK v2 已稳定发布，支持新协议并提供旧协议版本协商。
 
 实施顺序：
 
-1. 将 MCP 协议实现从连接生命周期中抽离，建立版本化协议适配层。
-2. 新增 2026-07-28 版本发现与协商能力（`server/discover`、请求元数据、`resultType`）。
-3. 支持 MRTR 的输入请求/响应往返；处理新旧协议返回值差异。
-4. 按新规范处理 Streamable HTTP 订阅；旧版 Streamable HTTP / SSE 保持兼容。
-5. 保留 2025-11-25 及 2024-11-05 旧服务连接能力，不能因升级导致现有 stdio MCP 服务失效。
-6. 增加协议 fixture、模拟 server 和独立 MCP Inspector / SDK 互操作测试。
+1. **优先评估官方 `@modelcontextprotocol/client` v2**，不继续扩写自维护的 JSON-RPC / HTTP / SSE 协议栈。SDK v2 实现 2026-07-28 规范，并支持自动协商旧版 2024-10-07 至 2025-11-25 协议。
+2. 在 FreeSeek 内保留现有 `McpManager` / 工具注册接口，将官方 SDK 封装在 transport adapter 内；保留环境变量白名单、凭据处理、超时、取消、日志和权限审批策略。
+3. 覆盖 stdio、Streamable HTTP、旧 SSE 服务；HTTP 认证与 legacy fallback 必须区分 401/403 和真正的 transport 不兼容，不能错误降级。
+4. 支持新协议的能力发现、请求元数据、`resultType`、MRTR 输入往返与订阅；保留旧协议服务兼容。
+5. 以官方 SDK v2 server fixture、MCP Inspector 和独立客户端建立新旧协议互操作测试。
+6. MCP SDK v2 要求 TypeScript 6.0 或更新版本；将 TypeScript、Node 类型和构建工具升级纳入同一依赖兼容批次。
 7. 更新 MCP 管理界面：显示协商版本、传输、能力、连接状态、工具与资源缓存状态。
 
 **验收：** 新旧 MCP 服务均可连接；工具、资源、提示词、取消、超时、错误与权限审批均有测试；旧服务失败不会拖垮内置工具。
@@ -158,6 +164,7 @@ Desktop ─┘                                      │
 - [Node.js Release Schedule](https://github.com/nodejs/Release)：Node 22 / 24 / 26 支持矩阵。
 - [Node.js EOL](https://nodejs.org/en/about/eol)：停止维护的运行时不得继续作为正式支持基线。
 - [MCP 2026-07-28 Changelog](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/specification/2026-07-28/changelog.mdx)：无状态化、能力发现、MRTR 与订阅机制。
+- [Official MCP TypeScript SDK v2](https://ts.sdk.modelcontextprotocol.io/v2/)：官方 v2 Client 支持新协议及旧版自动协商；FreeSeek 应优先封装官方 SDK，而不是继续维护自定义 JSON-RPC 协议栈。
 - [ACP v2 Draft Announcement](https://github.com/agentclientprotocol/agent-client-protocol/blob/main/docs/announcements/acp-v2-draft.mdx)：v2 继续处于 Draft，需与 v1 并行、按协商和 feature flag 启用。
 - [Official ACP TypeScript SDK](https://www.npmjs.com/package/@agentclientprotocol/sdk)：默认入口对应稳定 ACP v1，实验入口单独区分。
 - [OpenAI Responses API Migration Guide](https://developers.openai.com/api/docs/guides/migrate-to-responses)：Responses 是新项目推荐接口；Chat Completions 保持兼容，需分别处理 typed output 与流式事件。
