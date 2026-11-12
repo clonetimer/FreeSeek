@@ -6,14 +6,6 @@
  * keeps its existing ToolRegistry-facing contract and applies its own
  * environment allowlist and per-request timeout policy here.
  */
-import {
-  Client,
-  SdkHttpError,
-  SSEClientTransport,
-  StreamableHTTPClientTransport,
-  type CallToolRequestOptions,
-} from "@modelcontextprotocol/client";
-import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
 export interface McpSdkServerConfig {
   name: string;
@@ -53,9 +45,11 @@ export function buildMcpEnv(extra?: Record<string, string>): Record<string, stri
  * legacy SSE-only MCP server. Authentication, authorization, server errors,
  * timeouts and network failures must never trigger a transport downgrade.
  */
-export function isLegacySseFallbackError(error: unknown): error is SdkHttpError {
-  if (!(error instanceof SdkHttpError)) return false;
-  return [404, 405, 406, 415].includes(error.status);
+export function isLegacySseFallbackError(error: unknown): error is { name: "SdkHttpError"; status: number } {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { name?: string; status?: number };
+  return candidate.name === "SdkHttpError" && typeof candidate.status === "number"
+    && [404, 405, 406, 415].includes(candidate.status);
 }
 
 function requestSignal(signal?: AbortSignal): AbortSignal {
@@ -91,7 +85,7 @@ function formatContent(content: readonly any[] | undefined): string {
 
 /** One MCP server connection, backed entirely by the official TypeScript SDK v2. */
 export class McpConnection {
-  private client: Client | null = null;
+  private client: any = null;
   private connected = false;
 
   tools: { name: string; description: string; inputSchema: any }[] = [];
@@ -112,8 +106,8 @@ export class McpConnection {
     return this.connected;
   }
 
-  private createClient(mode: "auto" | "legacy"): Client {
-    return new Client(
+  private createClient(ClientConstructor: any, mode: "auto" | "legacy"): any {
+    return new ClientConstructor(
       { name: "freeseek-coder", version: "0.26.0" },
       {
         versionNegotiation: mode === "auto"
@@ -219,7 +213,11 @@ export class McpConnection {
 
   private async connectStdio(): Promise<void> {
     if (!this.cfg.command) throw new Error("stdio 需要 command");
-    const transport = new StdioClientTransport({
+    const [clientSdk, stdioSdk] = await Promise.all([
+      import("@modelcontextprotocol/client"),
+      import("@modelcontextprotocol/client/stdio"),
+    ]);
+    const transport = new stdioSdk.StdioClientTransport({
       command: this.cfg.command,
       args: this.cfg.args ?? [],
       env: buildMcpEnv(this.cfg.env),
@@ -228,7 +226,7 @@ export class McpConnection {
     // Preserve the previous policy: MCP child stderr must never contaminate
     // the host protocol stream or expose arbitrary child output in normal logs.
     transport.stderr?.on("data", () => undefined);
-    const client = this.createClient("auto");
+    const client = this.createClient(clientSdk.Client, "auto");
     this.client = client;
     try {
       await client.connect(transport, {
@@ -249,8 +247,9 @@ export class McpConnection {
       throw new Error("MCP HTTP endpoint 仅支持 http:// 或 https://");
     }
 
-    const modernClient = this.createClient("auto");
-    const modernTransport = new StreamableHTTPClientTransport(url, {
+    const clientSdk = await import("@modelcontextprotocol/client");
+    const modernClient = this.createClient(clientSdk.Client, "auto");
+    const modernTransport = new clientSdk.StreamableHTTPClientTransport(url, {
       redirectPolicy: "same-origin",
     });
     this.client = modernClient;
@@ -267,8 +266,8 @@ export class McpConnection {
       this.log.info?.(`[FreeSeek MCP] ${this.name} Streamable HTTP returned HTTP ${error.status}; trying legacy SSE transport`);
     }
 
-    const legacyClient = this.createClient("legacy");
-    const legacyTransport = new SSEClientTransport(url, {
+    const legacyClient = this.createClient(clientSdk.Client, "legacy");
+    const legacyTransport = new clientSdk.SSEClientTransport(url, {
       redirectPolicy: "same-origin",
     });
     this.client = legacyClient;
@@ -288,7 +287,7 @@ export class McpConnection {
     }
   }
 
-  private requireClient(): Client {
+  private requireClient(): any {
     if (!this.client) throw new Error(`MCP server "${this.name}" 未连接`);
     return this.client;
   }
@@ -329,7 +328,7 @@ export class McpConnection {
     const toolName = fullName.slice(prefix.length);
     if (!toolName) throw new Error("MCP tool name 不能为空");
 
-    const options: CallToolRequestOptions = { signal: requestSignal(signal) };
+    const options = { signal: requestSignal(signal) };
     const result = await this.requireClient().callTool(
       { name: toolName, arguments: args ?? {} },
       options
