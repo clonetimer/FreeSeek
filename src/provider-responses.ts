@@ -246,6 +246,51 @@ function createAssistantMessage(
   return message;
 }
 
+/** Preserve Responses output state and reconcile ReAct-parsed tool calls for the next stateless turn. */
+export function copyResponsesOutputState(
+  source: ChatMessage,
+  target: ChatMessage,
+  effectiveToolCalls?: ToolCall[]
+): void {
+  if (source.responses_output_items) {
+    const outputItems = source.responses_output_items as any[];
+    const responseCallIds = new Set(
+      outputItems.filter((item) => item?.type === "function_call").map((item) => item.call_id)
+    );
+    const hasAllResponseCalls = !!effectiveToolCalls &&
+      effectiveToolCalls.every((call) => responseCallIds.has(call.id));
+    if (!effectiveToolCalls?.length || hasAllResponseCalls) {
+      target.responses_output_items = outputItems;
+    } else {
+      // ReAct parsing can synthesize tool calls from text. Rebuild the Responses
+      // input projection so each function_call_output has a matching function_call,
+      // while retaining opaque reasoning state from the original model response.
+      const reasoningItems = outputItems.filter((item) => item?.type === "reasoning");
+      const originalMessage = outputItems.find((item) => item?.type === "message");
+      const textItem = target.content
+        ? {
+            ...(originalMessage ?? {}),
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: target.content }],
+          }
+        : null;
+      const syntheticCalls = effectiveToolCalls.map((call) => ({
+        type: "function_call",
+        call_id: call.id,
+        name: call.function.name,
+        arguments: call.function.arguments,
+      }));
+      target.responses_output_items = [
+        ...reasoningItems,
+        ...(textItem ? [textItem] : []),
+        ...syntheticCalls,
+      ];
+    }
+  }
+  if (source.responses_phase) target.responses_phase = source.responses_phase;
+}
+
 /** Stream OpenAI Responses API semantic SSE events through the existing FreeSeek stream contract. */
 export async function streamResponses(
   cfg: ResolvedConfig,
