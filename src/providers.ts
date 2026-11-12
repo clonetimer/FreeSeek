@@ -140,7 +140,7 @@ export function isAutoSelection(sel: ActiveSelection | null | undefined): boolea
 export interface ResolvedConfig {
   providerId: string;
   providerName: string;
-  /** 完整的请求端点 URL（openai 为 /chat/completions，claude 为 /v1/messages，gemini 为 generateContent） */
+  /** 完整请求端点：openai=/chat/completions、responses=/responses、claude=/v1/messages、gemini=generateContent。 */
   endpoint: string;
   apiKey: string;
   model: string;
