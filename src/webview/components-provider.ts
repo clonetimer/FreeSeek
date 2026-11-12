@@ -1,6 +1,7 @@
 import { el } from "./components-base";
 import { ui } from "./state";
 import { DEEPSEEK_DEFAULT_MODEL, DEEPSEEK_OFFICIAL_BASE_URL, DEEPSEEK_PRO_MODEL } from "../deepseek";
+import type { ModelCapabilities } from "../providers";
 
 // 实时拉取模型列表的回调注册表：主进程 fetch_models_result 消息到达时派发。
 type FetchModelsListener = (res: { reqId?: number; models?: string[]; error?: string }) => void;
@@ -16,7 +17,7 @@ export function dispatchFetchModelsResult(res: { reqId?: number; models?: string
   for (const fn of list) fn(res);
 }
 
-const ADD_PROVIDER_PRESETS: Array<{ id: string; name: string; baseUrl: string; format: string; authType?: "none" | "bearer"; models: string; envKey: string; autoDiscover?: boolean }> = [
+const ADD_PROVIDER_PRESETS: Array<{ id: string; name: string; baseUrl: string; format: string; authType?: "none" | "bearer"; models: string; envKey: string; autoDiscover?: boolean; capabilities?: ModelCapabilities; storeResponses?: boolean }> = [
   { id: "deepseek", name: "DeepSeek", baseUrl: DEEPSEEK_OFFICIAL_BASE_URL, format: "openai", models: `${DEEPSEEK_DEFAULT_MODEL}, ${DEEPSEEK_PRO_MODEL}`, envKey: "DEEPSEEK_API_KEY" },
   { id: "openrouter", name: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", format: "openai", models: "openrouter/auto", envKey: "OPENROUTER_API_KEY" },
   { id: "siliconflow", name: "硅基流动", baseUrl: "https://api.siliconflow.cn/v1", format: "openai", models: "Qwen/Qwen2.5-72B-Instruct", envKey: "SILICONFLOW_API_KEY" },
@@ -24,7 +25,8 @@ const ADD_PROVIDER_PRESETS: Array<{ id: string; name: string; baseUrl: string; f
   { id: "qwen", name: "阿里通义千问", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", format: "openai", models: "qwen-plus", envKey: "DASHSCOPE_API_KEY" },
   { id: "zhipu", name: "智谱 GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4", format: "openai", models: "glm-4-plus", envKey: "ZHIPU_API_KEY" },
   { id: "tencent-hunyuan", name: "腾讯云混元", baseUrl: "https://api.hunyuan.cloud.tencent.com/v1", format: "openai", models: "hunyuan-turbo, hunyuan-pro", envKey: "TENCENT_HUNYUAN_API_KEY" },
-  { id: "openai", name: "OpenAI", baseUrl: "https://api.openai.com/v1", format: "openai", models: "gpt-4o-mini", envKey: "OPENAI_API_KEY" },
+  { id: "openai", name: "OpenAI (Responses API)", baseUrl: "https://api.openai.com/v1", format: "responses", models: "gpt-6.1-sol", envKey: "OPENAI_API_KEY", capabilities: { tools: true, vision: true, reasoning: true, structuredOutput: true, contextWindow: 1_050_000, maxOutputTokens: 128_000, inputModalities: ["text", "image"], outputModalities: ["text"] } },
+  { id: "openai-chat", name: "OpenAI (Chat Completions)", baseUrl: "https://api.openai.com/v1", format: "openai", models: "gpt-6.1-sol", envKey: "OPENAI_API_KEY", capabilities: { tools: true, vision: true, reasoning: true, structuredOutput: true, contextWindow: 1_050_000, maxOutputTokens: 128_000, inputModalities: ["text", "image"], outputModalities: ["text"] } },
   { id: "ollama", name: "Ollama 本地", baseUrl: "http://127.0.0.1:11434/v1", format: "openai", authType: "none", models: "", envKey: "", autoDiscover: true },
   { id: "lmstudio", name: "LM Studio 本地", baseUrl: "http://127.0.0.1:1234/v1", format: "openai", authType: "none", models: "", envKey: "", autoDiscover: true },
   { id: "custom", name: "自定义 / 其它服务商", baseUrl: "", format: "openai", models: "", envKey: "" },
@@ -154,6 +156,18 @@ export function openAddProviderModal(): void {
   ctxInput.style.cssText = inputCss + "margin:2px 0 12px;";
   body.appendChild(ctxInput);
 
+  // Responses API 默认关闭服务端存储；只有用户明确选择后才启用。
+  const storeResponsesRow = el("label", "add-prov-row");
+  storeResponsesRow.style.cssText = "display:none;align-items:center;gap:8px;margin:0 0 10px;";
+  const storeResponsesCheckbox = document.createElement("input");
+  storeResponsesCheckbox.type = "checkbox";
+  storeResponsesCheckbox.checked = false;
+  const storeResponsesText = el("span", "", "允许 OpenAI 服务端存储 Responses（默认关闭）");
+  storeResponsesText.style.cssText = "font-size:12px;color:var(--vscode-descriptionForeground);";
+  storeResponsesRow.appendChild(storeResponsesCheckbox);
+  storeResponsesRow.appendChild(storeResponsesText);
+  body.appendChild(storeResponsesRow);
+
   // 实时拉取：当前 modal 的请求 id（去重，避免过期响应覆盖新选择）
   let fetchReqId = 0;
   fetchBtn.addEventListener("click", () => {
@@ -260,6 +274,7 @@ export function openAddProviderModal(): void {
   let currentBaseUrl = "";
   let currentAutoDiscover = false;
   let currentModels: string[] = [];
+  let currentCapabilities: ModelCapabilities | undefined;
 
   // 预设选择 → 自动填充 KEY 引用 + 刷新模型下拉
   const applyPreset = () => {
@@ -267,6 +282,9 @@ export function openAddProviderModal(): void {
     if (!p) return;
     currentBaseUrl = p.baseUrl;
     currentAutoDiscover = !!p.autoDiscover;
+    currentCapabilities = p.capabilities;
+    storeResponsesRow.style.display = p.format === "responses" ? "flex" : "none";
+    storeResponsesCheckbox.checked = p.storeResponses === true;
     currentModels = p.models ? p.models.split(/[,，\s]+/).map((s) => s.trim()).filter(Boolean) : [];
     if (p.envKey && !keyInput.value) keyInput.value = `\${env:${p.envKey}}`;
     // 刷新模型下拉
@@ -329,6 +347,8 @@ export function openAddProviderModal(): void {
       toolMode: "native",
       format: p.format,
       authType: p.authType ?? "bearer",
+      capabilities: currentCapabilities,
+      storeResponses: p.format === "responses" && storeResponsesCheckbox.checked,
       autoDiscover: currentAutoDiscover,
       contextWindow: ctxInput.value.trim(),
     });
