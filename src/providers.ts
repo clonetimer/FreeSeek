@@ -515,7 +515,7 @@ function guessStrengthsFromName(name: string, provider: ProviderConfig): Array<"
   applyCapability("reasoning", "reason");
   applyCapability("vision", "vision");
   applyCapability("tools", "tools");
-  if (capabilities.inputModalities?.includes("image")) s.add("vision");
+  if (capabilities.vision !== false && capabilities.inputModalities?.includes("image")) s.add("vision");
   if ((capabilities.contextWindow ?? provider.contextWindow ?? 0) >= 200_000) s.add("long");
   if (s.size === 0) s.add("chat");
   s.add("chat");
