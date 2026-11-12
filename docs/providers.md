@@ -30,7 +30,9 @@ Responses adapter 使用 typed input/output items 和语义化 SSE 事件。Free
 - 默认发送 `store:false`，不使用远端 `conversation` 或 `previous_response_id`；本地 EventLog 是会话历史的唯一来源。
 - 请求 `reasoning.encrypted_content`，并将需要续接的原始 output items 本地持久化，以支持无服务端状态存储的多轮推理。
 - 只有显式设置 `storeResponses:true` 才允许服务端存储 Response 对象。
-- `max_tokens` 会兼容映射为 Responses API 的 `max_output_tokens`；不透传 Chat Completions 的 `messages` 和 `stream_options` 字段。
+- `max_tokens` 会兼容映射为 Responses API 的 `max_output_tokens`；Chat Completions 的 `response_format` 会映射为 `text.format`，也可直接通过 `extraBody.text.format` 配置。
+- 推理模型不注入 Chat Completions 风格的 `temperature` / `top_p` 默认值；如需调整推理强度，可通过 `extraBody.reasoning.effort` 显式配置。
+- 不透传 Chat Completions 的 `messages` 和 `stream_options` 字段。
 
 示例：
 
