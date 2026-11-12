@@ -468,7 +468,8 @@
               },
               "storeResponses": {
                 "type": "boolean",
-                "default": false
+                "default": false,
+                "description": "仅 responses 协议有效。默认 false；设为 true 才允许 OpenAI 服务端存储 Response 对象。"
               },
               "headers": {
                 "type": "object",
