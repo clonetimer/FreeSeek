@@ -1,6 +1,7 @@
 // check:max-lines 640 (待拆分：streamChat/idle 看门狗/非流式辅助调用拆出后减小；v0.17.8 新增 streamChatWithIdleTimeout 后上升)
 import { resolveActiveConfig, resolveConfigFor, ResolvedConfig, ModelOverride, TaskProfile } from "./providers";
 import { debugLogRequest, debugLogAux, debugWarn } from "./debug";
+import { streamResponses, completeResponsesText } from "./provider-responses";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
@@ -10,7 +11,11 @@ export interface ChatMessage {
   tool_call_id?: string;
   /** DeepSeek 等思考模型的 reasoning 内容；发生 tool call 时后续轮次必须原样回传。 */
   reasoning_content?: string;
-  /** 多模态图片（base64 data URL 数组）。仅对支持视觉的 provider 有意义；组装 body 时转成 OpenAI 多模态格式。 */
+  /** Responses API 原始输出项；用于无服务端状态存储时精确恢复 reasoning/tool-call 上下文。 */
+  responses_output_items?: unknown[];
+  /** Responses API assistant message phase，后续请求时原样保留。 */
+  responses_phase?: "commentary" | "final_answer";
+  /** 多模态图片（base64 data URL 数组）。仅对支持视觉的 provider 有意义；组装 body 时转成协议对应格式。 */
   images?: string[];
 }
 
@@ -61,6 +66,10 @@ export async function streamChat(
         ? "当前（实验性 Web 兼容）提供商尚未配置 userToken。请在 FreeSeek Provider 设置界面保存凭据（会写入 VS Code SecretStorage），或在 freesek.providers 中把 apiKey 设为 ${env:YOUR_TOKEN} 引用的环境变量。"
         : "当前提供商尚未配置 API Key。请在 FreeSeek Provider 设置界面保存凭据（会写入 VS Code SecretStorage），或使用 ${env:YOUR_KEY} 引用环境变量。";
     throw new Error(hint);
+  }
+
+  if (cfg.format === "responses") {
+    return streamResponses(cfg, messages, tools, handlers);
   }
 
   const body = buildChatBody(cfg, messages, tools);
@@ -198,6 +207,9 @@ export async function streamChat(
  * 纯函数：便于单测（SSE 解析与 body 组装是错误高发区）。
  */
 export function buildChatBody(cfg: ResolvedConfig, messages: ChatMessage[], tools: ToolDefinition[]): Record<string, unknown> {
+  if (cfg.format === "responses") {
+    throw new Error("Responses API requests must use the dedicated streamResponses adapter.");
+  }
   const base: Record<string, unknown> = {};
   // 透传供应商专属额外参数（extraBody 优先级最低，被下方标准字段覆盖）
   Object.assign(base, cfg.extraBody);
@@ -422,6 +434,18 @@ export async function summarizeConversation(text: string, override?: ModelOverri
     return "";
   }
   try {
+    if (cfg.format === "responses") {
+      return await completeResponsesText(cfg, [
+        {
+          role: "system",
+          content:
+            "你是上下文压缩模块。请将以下编程助手对话历史压缩为结构化摘要，严格保留所有关键决策、文件路径、函数/类名、未完成任务与重要事实。用中文，按以下小标题分节（无内容则省略该节）：\n" +
+            "## 目标\n## 关键决策\n## 代码改动\n## 待办事项\n## 风险与未决问题\n" +
+            "若历史以代码为主，务必保留文件路径与符号名；不要编造未出现的内容。",
+        },
+        { role: "user", content: text },
+      ], { temperature: 0.2 });
+    }
     const res = await fetch(cfg.endpoint, {
       method: "POST",
       headers: cfg.headers,
@@ -467,6 +491,16 @@ export async function extractMemoryFacts(text: string): Promise<string> {
     return "";
   }
   try {
+    if (cfg.format === "responses") {
+      return await completeResponsesText(cfg, [
+        {
+          role: "system",
+          content:
+            "你是记忆抽取模块。从以下将被压缩的对话历史中，提取值得长期记住的持久事实：用户偏好与习惯、项目约定、关键技术决策、文件/模块架构、未决问题、踩过的坑。每条以 [记忆] 开头写一行，只输出 [记忆] 行，不要其他解释。若没有值得记住的，只输出 [NO_MEMORY]。",
+        },
+        { role: "user", content: text },
+      ], { temperature: 0.2 });
+    }
     const res = await fetch(cfg.endpoint, {
       method: "POST",
       headers: cfg.headers,
@@ -510,6 +544,16 @@ export async function reflectConversation(prompt: string): Promise<string> {
   }
   if (!cfg.apiKey) return "";
   try {
+    if (cfg.format === "responses") {
+      return await completeResponsesText(cfg, [
+        {
+          role: "system",
+          content:
+            "你是编程智能体的自我审视模块。基于给定会话片段，用中文简洁输出：是否反复犯错、用户是否反复纠正、是否有高频操作可做成技能。严格按要求的格式输出。",
+        },
+        { role: "user", content: prompt },
+      ], { temperature: 0.3 });
+    }
     const res = await fetch(cfg.endpoint, {
       method: "POST",
       headers: cfg.headers,
