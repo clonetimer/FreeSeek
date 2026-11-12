@@ -1,6 +1,6 @@
 # FreeSeek 现代化改造路线图（2026 Q4）
 
-> 状态：P0 已合并；P1 MCP SDK v2 迁移进行中  
+> 状态：P0、P1 已完成并合并；P2 ACP 官方 SDK 互操作升级进行中  
 > 目标：在保留现有 Agent Kernel、ToolRuntime 和多宿主能力的基础上，把 FreeSeek 从功能堆叠型 Coding Agent 收敛为可维护、协议兼容、安全可控、易于使用的本地优先 AI 开发平台。  
 > 原则：先建立可重复验证的基线，再升级协议和 Provider；不以大规模重写代替架构治理，不为追逐版本号而牺牲兼容性。
 
@@ -78,7 +78,7 @@ Desktop ─┘                                      │
 - Web Console 关闭 SSE 心跳计时器，并在 ACP sidecar 关闭时先结束 stdin，让 POSIX 子进程完成 EOF 优雅退出；SIGTERM / SIGKILL 仅作为兜底。
 - 测试运行器固定默认并发为 4，并为单项测试设置 120 秒上限，避免不同 CI runner 并行度差异造成耗时不可控。
 
-### P1 — MCP 协议现代化（实现中；独立分支 `modernize/p1-mcp-sdk-v2`）
+### P1 — MCP 协议现代化（已完成；独立 PR #2 已合并）
 
 P1 分支已将 MCP 连接执行层迁移至官方 `@modelcontextprotocol/client` v2.4.0。原 `McpManager`、工具命名与 Agent ToolRuntime 路由保持不变；新 adapter 使用 SDK 处理 JSON-RPC、stdio / Streamable HTTP / SSE、协议协商、分页、取消与 list-changed 通知。SDK v2 实现 MCP 2026-07-28 规范，并提供旧协议版本协商。
 
@@ -94,20 +94,23 @@ P1 分支已将 MCP 连接执行层迁移至官方 `@modelcontextprotocol/client
 
 **当前实现：** 新增 `src/mcp-sdk.ts` 官方 SDK adapter，`McpManager` / ToolRuntime 路由契约保持不变；已接入 stdio、Streamable HTTP 自动协商与 legacy SSE 受控回退，包含工具/资源/Prompt、list-changed、请求超时与取消。Node 22+、TypeScript 6、VS Code 1.101+ 运行时基线已对齐。
 
-**当前专项测试：** 已新增现代 Streamable HTTP、旧 stdio、旧 SSE-only、认证失败不降级、环境变量白名单等回归测试。跨平台 CI 正在验证；只有全部受支持环境通过，P1 才能收尾。
+**验收结果：PASS。** PR #2 已合并至 main，合并提交 `2b4e0146bd07f8e2ace3114fa73498b46a4d850b`。官方 SDK v2 adapter 与旧服务兼容层通过 Ubuntu / Windows / macOS × Node 22 / 24 / 26 的 9/9 PR CI。专项覆盖现代 Streamable HTTP、旧 stdio、旧 SSE-only、401/403 不降级、旧服务缺失 capability 声明的兼容处理、环境变量白名单、工具/资源/Prompt 调用与关闭清理。
 
 **验收：** 新旧 MCP 服务均可连接；工具、资源、提示词、取消、超时、错误与权限审批均有测试；旧服务失败不会拖垮内置工具。
 
-### P2 — ACP 互操作升级
+### P2 — ACP 互操作升级（已完成；独立 PR #3）
 
-1. 以 ACP 稳定 v1 为默认协议基线，补齐当前稳定 v1 的方法、能力声明和 schema 兼容测试。
-2. 评估接入官方 `@agentclientprotocol/sdk` 的收益；优先用于类型/schema/conformance，避免为了使用 SDK 重写已经稳定的执行内核。
-3. 对照官方 v1 schema 修正文档和 capability matrix。
-4. 建立独立客户端互操作测试，覆盖初始化、会话创建/恢复/加载/关闭、模式切换、取消、权限请求、MCP 和历史回放。
-5. ACP v2 目前处于 Draft：建立隔离的实验适配层与 feature flag；不默认启用、不替换 v1，也不把 draft 能力宣传为 Stable。
-6. 将 ACP 协议版本、FreeSeek 产品版本和 Desktop 版本分开管理，避免混用。
+1. 以 ACP 稳定 v1 为默认协议基线，保持现有 FreeSeek ACP Host / Agent Kernel 边界。
+2. 将官方 `@agentclientprotocol/sdk` 2.6.0 作为开发测试依赖；默认入口使用稳定 v1，不将实验 v2 SDK 引入生产宿主。
+3. 以官方 SDK client 作为独立互操作端，直接连接真实 FreeSeek stdio ACP Host，验证初始化、能力声明、session/new、prompt、list、resume、load、close 和 additionalDirectories。
+4. 对照官方 v1 schema 修正文档和 capability matrix，尤其核对 `loadSession`、`additionalDirectories`、elicitation 与 MCP 传输能力。
+5. 保留现有自定义 ACP server transport，除非独立 SDK 互操作测试证明存在协议层缺陷；不为使用 SDK 而重写已经稳定的 Agent/Session 执行内核。
+6. ACP v2 目前处于 Draft：保持隔离，不默认启用、不替换 v1，也不把 draft 能力宣传为 Stable。
+7. 将 ACP 协议版本、FreeSeek 产品版本和 Desktop 版本分开管理，避免混用。
 
-**验收：** 稳定 v1 与独立客户端互操作通过；v2 实验不影响 v1；能力声明与实际实现、文档、测试一致。
+**验收结果：PASS。** PR #3 的官方 SDK 客户端互操作测试通过；PR CI [43159475763](https://github.com/clonetimer/FreeSeek/actions/runs/43159475763) 通过 Ubuntu / Windows / macOS × Node 22 / 24 / 26 全部 9/9 环境。代表性 Ubuntu / Node 22 测试结果为 544 项测试、528 PASS、16 SKIP、0 FAIL；独立 smoke 子套件 3 PASS、1 SKIP、0 FAIL。`docs/acp.md` 已按源码修正稳定 v1 能力声明。
+
+**验收：** 稳定 v1 与官方独立客户端互操作通过；session/load 与 additionalDirectories 语义通过真实会话回归；v2 实验不影响 v1；能力声明与实际实现、文档、测试一致。
 
 ### P3 — Provider 与模型能力现代化
 

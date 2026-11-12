@@ -585,7 +585,8 @@
     "esbuild": "^0.21.0",
     "highlight.js": "^11.9.0",
     "marked": "^16.4.2",
-    "typescript": "^6.0.0"
+    "typescript": "^6.0.0",
+    "@agentclientprotocol/sdk": "^2.6.0"
   },
   "dependencies": {
     "cytoscape": "^3.34.1",
