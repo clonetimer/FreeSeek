@@ -217,6 +217,14 @@ export function buildChatBody(cfg: ResolvedConfig, messages: ChatMessage[], tool
     throw new Error("Responses API requests must use the dedicated streamResponses adapter.");
   }
   const base: Record<string, unknown> = {};
+  // Responses-only archived reasoning state is meaningful only to the Responses adapter.
+  // Do not leak empty synthetic assistant messages into Chat Completions/Claude/Gemini.
+  const protocolMessages = messages.filter((message) => !(
+    message.role === "assistant" &&
+    !message.content &&
+    message.responses_output_items?.length &&
+    !message.tool_calls?.length
+  ));
   // 透传供应商专属额外参数（extraBody 优先级最低，被下方标准字段覆盖）
   Object.assign(base, cfg.extraBody);
 
@@ -224,7 +232,7 @@ export function buildChatBody(cfg: ResolvedConfig, messages: ChatMessage[], tool
     // Anthropic /v1/messages：system 单独提出来，其余按 role 组装
     const systemParts: string[] = [];
     const conv: any[] = [];
-    for (const m of messages) {
+    for (const m of protocolMessages) {
       if (m.role === "system") {
         systemParts.push(m.content);
       } else if (m.role === "assistant") {
@@ -273,7 +281,7 @@ export function buildChatBody(cfg: ResolvedConfig, messages: ChatMessage[], tool
     // Google Gemini generateContent：contents + systemInstruction + generationConfig
     const contents: any[] = [];
     let sysText = "";
-    for (const m of messages) {
+    for (const m of protocolMessages) {
       if (m.role === "system") {
         sysText += m.content + "\n";
       } else {
@@ -301,7 +309,7 @@ export function buildChatBody(cfg: ResolvedConfig, messages: ChatMessage[], tool
   }
 
   // openai 兼容
-  const openaiMessages = messages.map(stripUndefined);
+  const openaiMessages = protocolMessages.map(stripUndefined);
   // Prompt Caching：部分 openai 兼容网关（DeepSeek/OpenAI 等）支持在消息上加 "cache" 标记，
   // 命中后多轮固定前缀按折扣计费。不支持的服务会忽略该字段，安全无害。
   if (cfg.promptCache && openaiMessages.length > 0) {
