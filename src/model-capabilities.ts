@@ -30,7 +30,7 @@ export function getModelCapabilities(provider: ProviderConfig, modelId: string):
 
 
 /** Human-readable capability summary; omitted fields are deliberately not guessed. */
-function modelCapabilitySummary(provider: ProviderConfig, modelId: string): string {
+export function modelCapabilitySummary(provider: ProviderConfig, modelId: string): string {
   const caps = getModelCapabilities(provider, modelId);
   const parts = [provider.name];
   if (caps.tools !== undefined) parts.push(caps.tools ? "Tools" : "No tools");
