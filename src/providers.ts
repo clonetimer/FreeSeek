@@ -662,7 +662,10 @@ function modelCapabilitySummary(provider: ProviderConfig, modelId: string): stri
   if (caps.vision !== undefined) parts.push(caps.vision ? "Vision" : "No vision");
   if (caps.reasoning !== undefined) parts.push(caps.reasoning ? "Reasoning" : "No reasoning");
   if (caps.structuredOutput !== undefined) parts.push(caps.structuredOutput ? "Structured output" : "No structured output");
+  if (caps.inputModalities?.length) parts.push(`In: ${caps.inputModalities.join("/")}`);
+  if (caps.outputModalities?.length) parts.push(`Out: ${caps.outputModalities.join("/")}`);
   if (caps.contextWindow !== undefined) parts.push(`${caps.contextWindow.toLocaleString()} context`);
+  if (caps.maxOutputTokens !== undefined) parts.push(`${caps.maxOutputTokens.toLocaleString()} max output`);
   return parts.join(" · ");
 }
 
