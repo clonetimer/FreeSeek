@@ -1,6 +1,6 @@
 # FreeSeek 现代化改造路线图（2026 Q4）
 
-> 状态：P0、P1 已完成并合并；P2 ACP 官方 SDK 互操作升级进行中  
+> 状态：P0、P1、P2 已完成并合并；P3 已实现并通过 9/9 跨平台 CI，独立 PR #4 等待正式收尾  
 > 目标：在保留现有 Agent Kernel、ToolRuntime 和多宿主能力的基础上，把 FreeSeek 从功能堆叠型 Coding Agent 收敛为可维护、协议兼容、安全可控、易于使用的本地优先 AI 开发平台。  
 > 原则：先建立可重复验证的基线，再升级协议和 Provider；不以大规模重写代替架构治理，不为追逐版本号而牺牲兼容性。
 
@@ -112,7 +112,7 @@ P1 分支已将 MCP 连接执行层迁移至官方 `@modelcontextprotocol/client
 
 **验收：** 稳定 v1 与官方独立客户端互操作通过；session/load 与 additionalDirectories 语义通过真实会话回归；v2 实验不影响 v1；能力声明与实际实现、文档、测试一致。
 
-### P3 — Provider 与模型能力现代化（实施中；独立分支 `modernize/p3-responses-multi-provider`）
+### P3 — Provider 与模型能力现代化（实现完成；独立 PR #4：`modernize/p3-responses-multi-provider`）
 
 1. 新增独立 `responses` Provider 格式和 `/responses` endpoint；现有 `openai` 继续表示 Chat Completions，不改变旧配置语义。
 2. Responses adapter 使用 typed input/output items，完成 ChatMessage ↔ Responses item 映射；工具调用使用 `function_call` 与 `function_call_output`，工具执行继续统一进入 ToolRuntime。
@@ -126,7 +126,11 @@ P1 分支已将 MCP 连接执行层迁移至官方 `@modelcontextprotocol/client
 
 **当前审计结论：** 现有 Provider 主循环集中在 `src/provider.ts`，ChatMessage 和 EventLog 负责本地会话历史。Responses 实现将拆为独立 `src/provider-responses.ts`，通过既有 streamChat 契约接入，不复制 Agent/ToolRuntime。
 
-**验收：** 新旧 Provider 回归通过；Responses function calling 完成真实 ToolRuntime 往返；流式中断/取消/重试语义正确；store 默认关闭且推理状态可从本地 EventLog 恢复；能力描述可解释；本地模型与兼容网关不受影响。
+**实现与验收结果：PASS。** Responses `function_call` 已归一化为既有 ToolCall 契约，后续仍由共享 Agent / ToolRuntime 执行；`function_call_output` 在下一轮请求中按原始 call_id 回传。17 项新增 Responses mock-server 契约测试全部通过，覆盖 typed input/output、工具往返映射、结构化输出、reasoning encrypted content、SSE、incomplete/error/cancel、usage 和本地 EventLog 持久化。现有 Chat Completions / Anthropic / Gemini 回归保持通过。
+
+**跨平台验收：PASS。** CI [43169042730](https://github.com/clonetimer/FreeSeek/actions/runs/43169042730) 的 Ubuntu / Windows / macOS × Node 22 / 24 / 26 共 9/9 环境全部通过静态与架构门禁、单元/集成测试、生产构建和产物 smoke。代表性完整测试套件为 561 项、0 FAIL；操作系统差异导致 16–21 项环境性 SKIP。独立 smoke 子套件为 3 PASS、1 SKIP。没有使用真实 API Key 或产生付费模型调用；协议正确性由本地 mock Responses 服务验证。
+
+**交付记录：** 独立 PR #4 已创建为 Draft，待最终审查后合并。
 
 ### P4 — Agent Kernel 与安全边界治理
 
