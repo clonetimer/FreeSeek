@@ -11,6 +11,20 @@ test("estimateTokens: CJK 约 1.5 token/字，其它约 4 字符/token", () => {
   assert.equal(estimateTokens("a".repeat(100)), 25);
 });
 
+test("conversationTokens includes archived Responses output state", () => {
+  const withoutState: ChatMessage[] = [{ role: "assistant", content: "" }];
+  const withState: ChatMessage[] = [{
+    role: "assistant",
+    content: "",
+    responses_output_items: [{
+      type: "reasoning",
+      id: "rs_1",
+      encrypted_content: "x".repeat(1200),
+    }],
+  }];
+  assert.ok(conversationTokens(withState) > conversationTokens(withoutState));
+});
+
 test("conversationTokens: 每条消息 +4 固定开销", () => {
   const msgs: ChatMessage[] = [
     { role: "user", content: "abcd" },
