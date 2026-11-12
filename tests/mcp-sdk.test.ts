@@ -111,13 +111,13 @@ test("MCP SDK v2: legacy stdio servers remain compatible and environment inherit
     const readline = require("node:readline");
     const rl = readline.createInterface({ input: process.stdin });
     function reply(id, result) {
-      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n");
     }
     rl.on("line", (line) => {
       let message;
       try { message = JSON.parse(line); } catch { return; }
       if (message.method === "server/discover") {
-        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "Method not found" } }) + "\\n");
+        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "Method not found" } }) + "\n");
       } else if (message.method === "initialize") {
         reply(message.id, { protocolVersion: "2025-11-25", capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: "legacy-fixture", version: "1.0.0" } });
       } else if (message.method === "tools/list") {
@@ -179,7 +179,7 @@ test("MCP SDK v2: old SSE-only endpoints use the legacy SSE transport after a 40
             ? { content: [{ type: "text", text: "legacy-sse-result" }] }
             : {};
       if (message.id !== undefined) {
-        const frame = `event: message\\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: message.id, result })}\\n\\n`;
+        const frame = `event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: message.id, result })}\n\n`;
         for (const stream of streams) stream.write(frame);
       }
       res.writeHead(202); res.end();
@@ -206,7 +206,7 @@ test("MCP SDK v2: authentication failures never downgrade to legacy SSE", async 
   const server = http.createServer((req, res) => {
     if (req.method === "GET") sseConnections++;
     res.writeHead(req.method === "POST" ? 401 : 200, { "content-type": req.method === "POST" ? "text/plain" : "text/event-stream" });
-    res.end(req.method === "POST" ? "Unauthorized" : "event: endpoint\\ndata: /messages\\n\\n");
+    res.end(req.method === "POST" ? "Unauthorized" : "event: endpoint\ndata: /messages\n\n");
   });
   const url = await listen(server);
   const connection = new McpConnection("auth", { name: "auth", transport: "http", url });
