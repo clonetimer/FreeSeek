@@ -175,15 +175,14 @@ export class McpConnection {
       await this.connectHttp();
     }
     const client = this.requireClient();
-    const signal = AbortSignal.timeout(MCP_CONNECT_TIMEOUT_MS);
-    const tools = await client.listTools(undefined, { signal });
+    const tools = await client.listTools(undefined, { signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS) });
     this.tools = (tools.tools ?? []).map((tool) => ({
       name: tool.name,
       description: tool.description ?? "",
       inputSchema: tool.inputSchema ?? { type: "object", properties: {} },
     }));
     try {
-      const result = await client.listResources(undefined, { signal });
+      const result = await client.listResources(undefined, { signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS) });
       this.resources = (result.resources ?? []).map((resource) => ({
         uri: resource.uri,
         name: resource.name ?? resource.uri,
@@ -193,7 +192,7 @@ export class McpConnection {
       this.log.warn?.(`[FreeSeek MCP] ${this.name} resources/list unavailable: ${describeError(error)}`);
     }
     try {
-      const result = await client.listPrompts(undefined, { signal });
+      const result = await client.listPrompts(undefined, { signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS) });
       this.prompts = (result.prompts ?? []).map((prompt) => ({
         name: prompt.name,
         description: prompt.description ?? undefined,
