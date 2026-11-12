@@ -146,7 +146,7 @@ test("Responses request defaults to stateless storage and maps max_tokens to max
   assert.equal(body.store, false);
   assert.equal(body.stream, true);
   assert.equal(body.max_output_tokens, 8192);
-  assert.equal(body.temperature, 0.3);
+  assert.equal(body.temperature, undefined);
   assert.equal(body.previous_response_id, undefined);
   assert.equal(body.conversation, undefined);
   assert.equal(body.messages, undefined);
@@ -154,6 +154,23 @@ test("Responses request defaults to stateless storage and maps max_tokens to max
   assert.equal(body.max_tokens, undefined);
   assert.deepEqual(body.include, ["reasoning.encrypted_content"]);
   assert.equal((body.tools as any[])[0].strict, false);
+});
+
+test("Responses preserves explicit sampling only when reasoning is not declared", () => {
+  const unknown = buildResolvedConfig(provider({
+    extraBody: { temperature: 0.3, top_p: 0.8 },
+  }), "custom-model");
+  const unknownBody = buildResponsesBody(unknown, [{ role: "user", content: "hello" }], []);
+  assert.equal(unknownBody.temperature, 0.3);
+  assert.equal(unknownBody.top_p, 0.8);
+
+  const reasoning = buildResolvedConfig(provider({
+    capabilities: { reasoning: true },
+    extraBody: { temperature: 0.3, top_p: 0.8 },
+  }), "reasoning-model");
+  const reasoningBody = buildResponsesBody(reasoning, [{ role: "user", content: "hello" }], []);
+  assert.equal(reasoningBody.temperature, undefined);
+  assert.equal(reasoningBody.top_p, undefined);
 });
 
 test("Responses leaves reasoning encryption unknown unless capability is declared", () => {
