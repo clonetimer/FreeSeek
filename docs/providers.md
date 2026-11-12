@@ -53,11 +53,19 @@ Ollama / LM Studio。仅「自定义」需要手动填写。
 
 ## MCP 服务
 
-FreeSeek 支持连接外部 MCP server（stdio / http），连接后自动发现并注入工具
-（`mcp__<name>__<tool>`）。若 MCP server 暴露检索类工具（名称匹配
+FreeSeek 使用官方 `@modelcontextprotocol/client` v2.4.0 接入外部 MCP server。MCP 连接由 SDK 管理，FreeSeek 保留现有 `McpManager` 与 Agent 工具路由契约。
+
+支持的连接方式：
+
+- **stdio**：由 SDK 启动本地 MCP 子进程；仅继承 FreeSeek 的系统环境变量白名单及该 server 显式配置的 `env`。
+- **Streamable HTTP**：优先使用现代 HTTP transport，自动协商 MCP 2026-07-28 与旧版协议。
+- **Legacy SSE**：对 Streamable HTTP 明确返回 404 / 405 / 406 / 415 的端点，才尝试旧 SSE transport；401 / 403、5xx、超时和网络错误不会触发降级。
+
+SDK 负责 JSON-RPC、分页、协议协商、请求取消、资源与 Prompt 调用及 list-changed 通知。连接后自动发现工具、resources、prompts，并注入 `mcp__<name>__<tool>` 工具。若 MCP server 暴露检索类工具（名称匹配
 `search|query|retriev|kb|knowledge|find|lookup|semantic|vector|rag`），会自动暴露
-统一检索入口 `mcp_list_kb` + `mcp_kb_search`。MCP 相关配置见
-`freesek.mcpServers`（[settings.md](settings.md)）。
+统一检索入口 `mcp_list_kb` + `mcp_kb_search`。
+
+MCP 配置仍使用 `freesek.mcpServers`，现有 stdio / http 配置结构保持兼容（[settings.md](settings.md)）。本版最低运行环境为 Node.js 22 和 VS Code 1.101。
 
 ## 切换模型
 
