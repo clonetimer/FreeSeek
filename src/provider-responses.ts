@@ -123,12 +123,14 @@ export function buildResponsesBody(
     validPositiveInteger(legacyMaxTokens) ??
     cfg.capabilities.maxOutputTokens ??
     4096;
-  const include = new Set<string>([
-    ...(Array.isArray(cfg.extraBody.include)
+  const include = new Set<string>(
+    Array.isArray(cfg.extraBody.include)
       ? cfg.extraBody.include.filter((item): item is string => typeof item === "string")
-      : []),
-    "reasoning.encrypted_content",
-  ]);
+      : []
+  );
+  if (cfg.capabilities.reasoning !== false) include.add("reasoning.encrypted_content");
+  const requestedTemperature = extra.temperature;
+  delete extra.temperature;
 
   const body: Record<string, unknown> = {
     ...extra,
@@ -138,6 +140,9 @@ export function buildResponsesBody(
     store: cfg.storeResponses,
     include: Array.from(include),
     max_output_tokens: maxOutputTokens,
+    ...(typeof requestedTemperature === "number" && cfg.capabilities.reasoning === false
+      ? { temperature: requestedTemperature }
+      : {}),
   };
 
   const supportsTools = cfg.toolMode === "native" && cfg.capabilities.tools !== false;
@@ -375,7 +380,7 @@ export async function streamResponses(
         throw responseFailure(event.response);
       }
       case "error": {
-        throw new Error(typeof event.message === "string" ? event.message : "Responses API stream error.");
+        throw responseFailure(event);
       }
       default:
         break;
@@ -393,6 +398,9 @@ export async function streamResponses(
     }
     buffer += decoder.decode();
     if (buffer.trim()) consumeLine(buffer);
+  } catch (error) {
+    try { await reader.cancel(error); } catch { /* stream may already be closed */ }
+    throw error;
   } finally {
     reader.releaseLock();
   }
@@ -402,9 +410,9 @@ export async function streamResponses(
     throw new Error("Responses API stream ended before response.completed or response.incomplete.");
   }
 
-  const outputItems = Array.isArray(completedResponse?.output)
-    ? completedResponse.output
-    : Array.from(outputItemsByIndex.entries()).sort((a, b) => a[0] - b[0]).map(([, item]) => item);
+  const responseOutput = Array.isArray(completedResponse?.output) ? completedResponse.output : [];
+  const streamedOutput = Array.from(outputItemsByIndex.entries()).sort((a, b) => a[0] - b[0]).map(([, item]) => item);
+  const outputItems = responseOutput.length ? responseOutput : streamedOutput;
   if (!assistantText) {
     assistantText = outputTextFromItems(outputItems);
     if (assistantText) handlers.onText(assistantText);
@@ -428,7 +436,9 @@ export async function completeResponsesText(
 ): Promise<string> {
   const body = buildResponsesBody(cfg, messages, [], false);
   delete body.max_output_tokens;
-  if (typeof options.temperature === "number") body.temperature = options.temperature;
+  if (typeof options.temperature === "number" && cfg.capabilities.reasoning === false) {
+    body.temperature = options.temperature;
+  }
   const response = await fetch(cfg.endpoint, {
     method: "POST",
     headers: cfg.headers,
