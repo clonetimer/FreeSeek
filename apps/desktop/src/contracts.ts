@@ -3,7 +3,7 @@ export interface DesktopProviderInput {
   baseUrl: string;
   apiKey?: string;
   model: string;
-  format: "openai" | "claude" | "gemini";
+  format: "openai" | "responses" | "claude" | "gemini";
   toolMode: "native" | "react";
   authType: "none" | "bearer" | "x-api-key" | "x-goog-api-key";
 }

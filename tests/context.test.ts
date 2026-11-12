@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { buildResponsesInput } from "../src/provider-responses";
 import assert from "node:assert/strict";
 import { estimateTokens, conversationTokens, usageRatio, tieredCompact, BudgetTracker } from "../src/context";
 import type { ChatMessage } from "../src/provider";
@@ -8,6 +9,20 @@ test("estimateTokens: CJK 约 1.5 token/字，其它约 4 字符/token", () => {
   assert.equal(estimateTokens("abcd"), 1);
   assert.equal(estimateTokens("中文测试"), 6); // 4 * 1.5
   assert.equal(estimateTokens("a".repeat(100)), 25);
+});
+
+test("conversationTokens includes archived Responses output state", () => {
+  const withoutState: ChatMessage[] = [{ role: "assistant", content: "" }];
+  const withState: ChatMessage[] = [{
+    role: "assistant",
+    content: "",
+    responses_output_items: [{
+      type: "reasoning",
+      id: "rs_1",
+      encrypted_content: "x".repeat(1200),
+    }],
+  }];
+  assert.ok(conversationTokens(withState) > conversationTokens(withoutState));
 });
 
 test("conversationTokens: 每条消息 +4 固定开销", () => {
@@ -108,3 +123,40 @@ test("BudgetTracker: 未达上限不停止", () => {
   assert.equal(stop, false);
   assert.equal(msg, null);
 });
+
+test("tieredCompact preserves stateless Responses reasoning items from summarized history", async () => {
+  const reasoning = {
+    type: "reasoning",
+    id: "rs_archived",
+    encrypted_content: "opaque-encrypted-state",
+  };
+  const messages: any[] = [
+    { role: "user", content: "old prompt" },
+    {
+      role: "assistant",
+      content: "old answer",
+      responses_output_items: [reasoning, {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "old answer" }],
+      }],
+    },
+    { role: "user", content: "middle prompt" },
+    { role: "assistant", content: "middle answer" },
+    { role: "user", content: "recent prompt" },
+  ];
+  const compacted = await tieredCompact(messages, undefined, 2, 1);
+  const archived = compacted.find((message) =>
+    message.role === "assistant" &&
+    message.responses_output_items?.some((item: any) => item?.id === "rs_archived")
+  );
+  assert.ok(archived, "archived reasoning state must survive compaction");
+  const input = buildResponsesInput(compacted);
+  assert.ok(input.some((item: any) =>
+    item.type === "reasoning" && item.encrypted_content === "opaque-encrypted-state"
+  ));
+  assert.ok(compacted.some((message) =>
+    message.role === "system" && message.content.includes("早期对话摘要")
+  ));
+});
+

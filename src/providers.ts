@@ -1,6 +1,12 @@
 // check:max-lines 680 (略超 600，纳入后续拆分)
 import { cachedProviderSecret } from "./provider-secrets";
 import { DEEPSEEK_DEFAULT_MODEL, DEEPSEEK_OFFICIAL_BASE_URL } from "./deepseek";
+import { getModelCapabilities, modelCapabilitySummary } from "./model-capabilities";
+import type { ModelCapabilities, ModelModality } from "./model-capabilities";
+import { inferTaskProfile } from "./provider-task-profile";
+import type { TaskProfile } from "./provider-task-profile";
+export { getModelCapabilities, modelCapabilitySummary, inferTaskProfile };
+export type { ModelCapabilities, ModelModality, TaskProfile };
 
 export interface ProviderSettingsHost {
   get<T>(key: string, fallback: T): T;
@@ -40,6 +46,8 @@ function settingsHost(): ProviderSettingsHost {
 export interface ModelEntry {
   id: string;
   name?: string;
+  /** Model-specific capability overrides; these take precedence over provider defaults. */
+  capabilities?: ModelCapabilities;
   /**
    * Auto 路由档次（可选）。未设置时按 name/id 启发式识别。
    *  - flagship：顶级旗舰（GPT-5/Opus/Sonnet 5 等），贵且强
@@ -58,7 +66,7 @@ export interface ModelEntry {
   strengths?: Array<"code" | "reason" | "vision" | "tools" | "chat" | "long">;
 }
 
-export type ProviderFormat = "openai" | "claude" | "gemini";
+export type ProviderFormat = "openai" | "responses" | "claude" | "gemini";
 export type AuthType = "none" | "bearer" | "x-api-key" | "x-goog-api-key";
 
 export interface ProviderConfig {
@@ -68,12 +76,17 @@ export interface ProviderConfig {
   apiKey?: string;
   toolMode?: "native" | "react";
   models: ModelEntry[];
+  /** Provider-level capability defaults; model.capabilities overrides individual fields. */
+  capabilities?: ModelCapabilities;
+  /** Responses API only: explicitly allow server-side response storage. Defaults to false. */
+  storeResponses?: boolean;
   /** 标记是否为默认提供（仅用于 UI 提示，不影响逻辑） */
   builtin?: boolean;
   /**
    * API 协议格式（决定请求体/流解析），默认 openai：
-   *  - openai：/chat/completions + Bearer（覆盖 OneAPI/中转/DeepSeek/通义/Kimi/智谱等）
-   *  - claude：/v1/messages + x-api-key + anthropic-version（含各类 Claude 中转）
+   *  - openai：/chat/completions（OpenAI-compatible 网关）
+   *  - responses：/responses（OpenAI Responses API，独立于 Chat Completions）
+   *  - claude：/v1/messages + x-api-key + anthropic-version
    *  - gemini：v1beta generateContent + x-goog-api-key
    */
   format?: ProviderFormat;
@@ -119,32 +132,6 @@ export interface ActiveSelection {
 export const AUTO_PROVIDER_ID = "__auto__";
 export const AUTO_MODEL_ID = "__auto__";
 
-/** Auto 路由的任务画像：调用方根据本次请求推断，传给 getActiveProvider/profile，
- *  路由模块据此挑选最合适的「已配置 key + 任务匹配 + 性价比优」的 provider/model。 */
-export type TaskProfile = "chat" | "code" | "reason" | "vision" | "tools" | "long";
-
-/** 从对话历史推断任务画像（用于 Auto 模式路由）。优先看最近一条 user 消息；
- *  - 看到图片 → vision；看到工具调用链 → tools；包含 "<think>" / "推理" / 数学 → reason；
- *  - 提到代码关键词或 read_file / grep 类上下文 → code；长上下文（>8K）→ long；
- *  - 其它 → chat（默认）。 */
-export function inferTaskProfile(messages: ReadonlyArray<{ role: string; content?: string; images?: unknown[] }>): TaskProfile {
-  let lastUser = "";
-  let lastAssistant = "";
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m.role === "user" && !lastUser) lastUser = String(m.content ?? "");
-    else if (m.role === "assistant" && !lastAssistant) lastAssistant = String(m.content ?? "");
-    if (lastUser && lastAssistant) break;
-  }
-  const text = (lastUser + "\n" + lastAssistant).slice(0, 4000).toLowerCase();
-  if (/```|\.ts|\.py|\.js|class |function |import |select |<code|read_file|grep|搜索|查(找|看)文件/.test(text)) return "code";
-  if (/<think>|推理|证明|计算|推导|equation|math|微分|积分|概率|统计/.test(text)) return "reason";
-  if (/\.(png|jpg|jpeg|gif|webp)|data:image|base64|image_url|图片|截图|看图|附图/.test(text)) return "vision";
-  if (/工具调用|tool_call|tool_result|spawn_agent|run_command|edit_file|write_file/.test(text)) return "tools";
-  if (text.length > 2000) return "long";
-  return "chat";
-}
-
 /** 当前选择是否为 Auto（智能选择）模式。 */
 export function isAutoSelection(sel: ActiveSelection | null | undefined): boolean {
   return !!sel && (sel.providerId === AUTO_PROVIDER_ID || sel.modelId === AUTO_MODEL_ID);
@@ -153,7 +140,7 @@ export function isAutoSelection(sel: ActiveSelection | null | undefined): boolea
 export interface ResolvedConfig {
   providerId: string;
   providerName: string;
-  /** 完整的请求端点 URL（openai 为 /chat/completions，claude 为 /v1/messages，gemini 为 generateContent） */
+  /** 完整请求端点：openai=/chat/completions、responses=/responses、claude=/v1/messages、gemini=generateContent。 */
   endpoint: string;
   apiKey: string;
   model: string;
@@ -168,6 +155,10 @@ export interface ResolvedConfig {
   contextWindow?: number;
   /** 是否启用 Prompt Caching（默认 true） */
   promptCache: boolean;
+  /** Responses API server-side response storage; defaults to false (local-first). */
+  storeResponses: boolean;
+  /** Provider defaults merged with model-specific capability overrides. Undefined fields remain unknown. */
+  capabilities: ModelCapabilities;
 }
 
 /**
@@ -470,16 +461,26 @@ function guessTierFromName(name: string): ModelEntry["tier"] {
 }
 
 /** 从 name/id 启发式识别 strengths（未显式标注时）。 */
-function guessStrengthsFromName(name: string, _provider: ProviderConfig): Array<"code" | "reason" | "vision" | "tools" | "chat" | "long"> {
+function guessStrengthsFromName(name: string, provider: ProviderConfig): Array<"code" | "reason" | "vision" | "tools" | "chat" | "long"> {
   const n = name.toLowerCase();
   const s = new Set<"code" | "reason" | "vision" | "tools" | "chat" | "long">();
   if (/code|coder|codex|kimi-k2|qwen-coder|deepseek-coder|devstral/.test(n)) s.add("code");
-  if (/reason|thinking|pro|opus|deepseek-r1|qwen-qwq|o1|o3|math|qwq/.test(n)) s.add("reason");
-  if (/vision|vl|gpt-4o|sonnet|gemini|qwen-vl|see|look|image|flash-lite|grounding/.test(n)) s.add("vision");
+  if (/reason|thinking|pro|opus|deepseek-r1|qwen-qwq|o1|o3|math|qwq|gpt-6/.test(n)) s.add("reason");
+  if (/vision|vl|gpt-4o|gpt-6|sonnet|gemini|qwen-vl|see|look|image|flash-lite|grounding/.test(n)) s.add("vision");
   if (/tools|tool|function|agent|claude|codex|gpt-5\b|qwen-max|deepseek-v4/.test(n)) s.add("tools");
-  if (/long|200k|1m|1mo|claude|gemini|opus|qwen-long/.test(n)) s.add("long");
+  if (/long|200k|1m|1mo|claude|gemini|opus|qwen-long|gpt-6/.test(n)) s.add("long");
+  const model = provider.models.find((entry) => entry.id === name);
+  const capabilities = { ...(provider.capabilities ?? {}), ...(model?.capabilities ?? {}) };
+  const applyCapability = (field: "reasoning" | "vision" | "tools", strength: "reason" | "vision" | "tools") => {
+    if (capabilities[field] === true) s.add(strength);
+    else if (capabilities[field] === false) s.delete(strength);
+  };
+  applyCapability("reasoning", "reason");
+  applyCapability("vision", "vision");
+  applyCapability("tools", "tools");
+  if (capabilities.vision !== false && capabilities.inputModalities?.includes("image")) s.add("vision");
+  if ((capabilities.contextWindow ?? provider.contextWindow ?? 0) >= 200_000) s.add("long");
   if (s.size === 0) s.add("chat");
-  // 兜底：所有都必备 chat
   s.add("chat");
   return Array.from(s);
 }
@@ -487,6 +488,8 @@ function guessStrengthsFromName(name: string, _provider: ProviderConfig): Array<
 /** 按 provider 的协议格式拼接完整请求端点。 */
 function buildEndpoint(base: string, format: ProviderFormat, model: string): string {
   switch (format) {
+    case "responses":
+      return `${base}/responses`;
     case "claude":
       return `${base}/v1/messages`;
     case "gemini":
@@ -522,19 +525,22 @@ export function buildResolvedConfig(provider: ProviderConfig, modelId: string): 
   const format = provider.format ?? "openai";
   const authType = provider.authType ?? "bearer";
   const apiKey = interpolateSecret(provider.apiKey);
+  const capabilities = getModelCapabilities(provider, modelId);
   return {
     providerId: provider.id,
     providerName: provider.name || provider.id,
     endpoint: buildEndpoint(base, format, modelId),
     apiKey,
     model: modelId,
-    toolMode: provider.toolMode === "react" ? "react" : "native",
+    toolMode: provider.toolMode === "react" || capabilities.tools === false ? "react" : "native",
     format,
     authType,
     headers: buildHeaders(provider, apiKey, format, authType),
     extraBody: provider.extraBody ?? {},
-    contextWindow: provider.contextWindow,
-    promptCache: provider.promptCache !== false,
+    contextWindow: capabilities.contextWindow,
+    promptCache: provider.promptCache !== false && capabilities.promptCaching !== false,
+    storeResponses: provider.storeResponses === true,
+    capabilities,
   };
 }
 
@@ -607,7 +613,8 @@ export function getActiveLabel(): string {
 export function getActiveToolMode(): "native" | "react" {
   const active = getActiveProvider();
   if (!active) return "native";
-  return active.provider.toolMode === "react" ? "react" : "native";
+  if (active.provider.toolMode === "react") return "react";
+  return getModelCapabilities(active.provider, active.modelId).tools === false ? "react" : "native";
 }
 
 /** 生成切换模型的 QuickPick 项（跨所有 provider 的所有模型）。 */
@@ -641,7 +648,7 @@ export function buildSwitchItems(): Array<{
       items.push({
         label: `${isActive ? "$(check) " : ""}${m.name || m.id}`,
         description: m.id,
-        detail: `${p.name} · ${p.toolMode === "react" ? "ReAct 文本协议" : "原生 function calling"}`,
+        detail: modelCapabilitySummary(p, m.id),
         providerId: p.id,
         modelId: m.id,
       });

@@ -144,7 +144,7 @@ function parseArgs(argv: string[]): HeadlessArgs {
     apiKey: process.env.FREESEEK_API_KEY ?? "",
     model: process.env.FREESEEK_MODEL ?? "",
     baseUrl: process.env.FREESEEK_BASE_URL ?? "",
-    format: (["openai", "claude", "gemini"] as const).includes(process.env.FREESEEK_FORMAT as any) ? process.env.FREESEEK_FORMAT as ProviderFormat : "openai",
+    format: (["openai", "responses", "claude", "gemini"] as const).includes(process.env.FREESEEK_FORMAT as any) ? process.env.FREESEEK_FORMAT as ProviderFormat : "openai",
     toolMode: (["native", "react"] as const).includes(process.env.FREESEEK_TOOL_MODE as any) ? process.env.FREESEEK_TOOL_MODE as "native" | "react" : "native",
     mode: (["coder", "plan", "ask"] as const).includes(process.env.FREESEEK_MODE as any) ? process.env.FREESEEK_MODE as "coder" | "plan" | "ask" : "coder",
     authType: (["none", "bearer", "x-api-key", "x-goog-api-key"] as const).includes(process.env.FREESEEK_AUTH_TYPE as any) ? process.env.FREESEEK_AUTH_TYPE as AuthType : "bearer",

@@ -259,7 +259,247 @@
               ]
             }
           ],
-          "description": "多提供商配置（数组）。每项：id/name/baseUrl/apiKey(支持 ${env:VAR} 或 ${setting:freesek.xxx} 插值)/toolMode(native=原生 function calling | react=ReAct 文本协议)/models[](每项 {id, name?})。可在设置直接编辑，或运行「FreeSeek: 添加提供商」向导。当前选中的 {providerId, modelId} 存于 freesek.activeModel。"
+          "description": "多提供商配置（数组）。每项：id/name/baseUrl/apiKey(支持 ${env:VAR} 或 ${setting:freesek.xxx} 插值)/toolMode/models[](每项 {id, name?, capabilities?})/format(openai=Chat Completions, responses=OpenAI Responses API, claude, gemini)/capabilities(可选能力默认值，模型级声明覆盖)/storeResponses(仅 Responses API，默认 false；显式 true 才允许服务端存储)。能力字段包括 tools、vision、reasoning、structuredOutput、promptCaching、contextWindow、maxOutputTokens、inputModalities、outputModalities；未声明表示 unknown。可在设置直接编辑，或运行「FreeSeek: 添加提供商」向导。当前选中的 {providerId, modelId} 存于 freesek.activeModel。",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "baseUrl": {
+                "type": "string"
+              },
+              "apiKey": {
+                "type": "string"
+              },
+              "toolMode": {
+                "type": "string",
+                "enum": [
+                  "native",
+                  "react"
+                ]
+              },
+              "format": {
+                "type": "string",
+                "enum": [
+                  "openai",
+                  "responses",
+                  "claude",
+                  "gemini"
+                ],
+                "default": "openai"
+              },
+              "authType": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "bearer",
+                  "x-api-key",
+                  "x-goog-api-key"
+                ],
+                "default": "bearer"
+              },
+              "models": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "tier": {
+                      "type": "string",
+                      "enum": [
+                        "flagship",
+                        "pro",
+                        "flash",
+                        "lite",
+                        "default"
+                      ]
+                    },
+                    "costScore": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 10
+                    },
+                    "strengths": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "code",
+                          "reason",
+                          "vision",
+                          "tools",
+                          "chat",
+                          "long"
+                        ]
+                      },
+                      "uniqueItems": true
+                    },
+                    "capabilities": {
+                      "type": "object",
+                      "properties": {
+                        "tools": {
+                          "type": "boolean",
+                          "description": "Model supports native function calling."
+                        },
+                        "vision": {
+                          "type": "boolean",
+                          "description": "Model accepts image input."
+                        },
+                        "reasoning": {
+                          "type": "boolean",
+                          "description": "Model supports reasoning controls or reasoning items."
+                        },
+                        "structuredOutput": {
+                          "type": "boolean"
+                        },
+                        "promptCaching": {
+                          "type": "boolean"
+                        },
+                        "contextWindow": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "maxOutputTokens": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "inputModalities": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "text",
+                              "image",
+                              "audio",
+                              "file"
+                            ]
+                          },
+                          "uniqueItems": true
+                        },
+                        "outputModalities": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "text",
+                              "image",
+                              "audio",
+                              "file"
+                            ]
+                          },
+                          "uniqueItems": true
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "additionalProperties": true
+                }
+              },
+              "capabilities": {
+                "type": "object",
+                "properties": {
+                  "tools": {
+                    "type": "boolean",
+                    "description": "Model supports native function calling."
+                  },
+                  "vision": {
+                    "type": "boolean",
+                    "description": "Model accepts image input."
+                  },
+                  "reasoning": {
+                    "type": "boolean",
+                    "description": "Model supports reasoning controls or reasoning items."
+                  },
+                  "structuredOutput": {
+                    "type": "boolean"
+                  },
+                  "promptCaching": {
+                    "type": "boolean"
+                  },
+                  "contextWindow": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "maxOutputTokens": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "inputModalities": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "text",
+                        "image",
+                        "audio",
+                        "file"
+                      ]
+                    },
+                    "uniqueItems": true
+                  },
+                  "outputModalities": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "text",
+                        "image",
+                        "audio",
+                        "file"
+                      ]
+                    },
+                    "uniqueItems": true
+                  }
+                },
+                "additionalProperties": false
+              },
+              "storeResponses": {
+                "type": "boolean",
+                "default": false,
+                "description": "仅 responses 协议有效。默认 false；设为 true 才允许 OpenAI 服务端存储 Response 对象。"
+              },
+              "headers": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "extraBody": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "autoDiscoverModels": {
+                "type": "boolean"
+              },
+              "contextWindow": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "promptCache": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "baseUrl",
+              "models"
+            ],
+            "additionalProperties": true
+          }
         },
         "freesek.activeModel": {
           "type": "object",

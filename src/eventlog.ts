@@ -310,6 +310,12 @@ export function messageForEventLog(
   if (message.name) copy.name = message.name;
   if (message.tool_call_id) copy.tool_call_id = message.tool_call_id;
   if (message.reasoning_content && message.role === "assistant") copy.reasoning_content = message.reasoning_content;
+  if (message.responses_output_items?.length && message.role === "assistant") {
+    copy.responses_output_items = message.responses_output_items.map((item) =>
+      item && typeof item === "object" && !Array.isArray(item) ? { ...(item as Record<string, unknown>) } : item
+    );
+  }
+  if (message.responses_phase && message.role === "assistant") copy.responses_phase = message.responses_phase;
   if (message.tool_calls) {
     copy.tool_calls = message.tool_calls.map((c: ToolCall) => ({
       id: c.id,

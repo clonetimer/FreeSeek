@@ -1,6 +1,7 @@
 // check:max-lines 640 (待拆分：streamChat/idle 看门狗/非流式辅助调用拆出后减小；v0.17.8 新增 streamChatWithIdleTimeout 后上升)
 import { resolveActiveConfig, resolveConfigFor, ResolvedConfig, ModelOverride, TaskProfile } from "./providers";
-import { debugLogRequest, debugLogAux, debugWarn } from "./debug";
+import { debugLogRequest, debugWarn } from "./debug";
+import { streamResponses } from "./provider-responses";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
@@ -10,7 +11,11 @@ export interface ChatMessage {
   tool_call_id?: string;
   /** DeepSeek 等思考模型的 reasoning 内容；发生 tool call 时后续轮次必须原样回传。 */
   reasoning_content?: string;
-  /** 多模态图片（base64 data URL 数组）。仅对支持视觉的 provider 有意义；组装 body 时转成 OpenAI 多模态格式。 */
+  /** Responses API 原始输出项；用于无服务端状态存储时精确恢复 reasoning/tool-call 上下文。 */
+  responses_output_items?: unknown[];
+  /** Responses API assistant message phase，后续请求时原样保留。 */
+  responses_phase?: "commentary" | "final_answer";
+  /** 多模态图片（base64 data URL 数组）。仅对支持视觉的 provider 有意义；组装 body 时转成协议对应格式。 */
   images?: string[];
 }
 
@@ -55,12 +60,22 @@ export async function streamChat(
   const cfg = override
     ? resolveConfigFor(override, profile, messages)
     : resolveActiveConfig(profile, messages);
+  const hasImages = messages.some((message) => message.images?.length);
+  const inputModalitiesExcludeImages = !!cfg.capabilities.inputModalities?.length &&
+    !cfg.capabilities.inputModalities.includes("image");
+  if (hasImages && (cfg.capabilities.vision === false || inputModalitiesExcludeImages)) {
+    throw new Error(`Model "${cfg.model}" is configured without image-input capability but the conversation contains images.`);
+  }
   if (!cfg.apiKey && cfg.authType !== "none") {
     const hint =
       cfg.toolMode === "react"
         ? "当前（实验性 Web 兼容）提供商尚未配置 userToken。请在 FreeSeek Provider 设置界面保存凭据（会写入 VS Code SecretStorage），或在 freesek.providers 中把 apiKey 设为 ${env:YOUR_TOKEN} 引用的环境变量。"
         : "当前提供商尚未配置 API Key。请在 FreeSeek Provider 设置界面保存凭据（会写入 VS Code SecretStorage），或使用 ${env:YOUR_KEY} 引用环境变量。";
     throw new Error(hint);
+  }
+
+  if (cfg.format === "responses") {
+    return streamResponses(cfg, messages, tools, handlers);
   }
 
   const body = buildChatBody(cfg, messages, tools);
@@ -198,7 +213,18 @@ export async function streamChat(
  * 纯函数：便于单测（SSE 解析与 body 组装是错误高发区）。
  */
 export function buildChatBody(cfg: ResolvedConfig, messages: ChatMessage[], tools: ToolDefinition[]): Record<string, unknown> {
+  if (cfg.format === "responses") {
+    throw new Error("Responses API requests must use the dedicated streamResponses adapter.");
+  }
   const base: Record<string, unknown> = {};
+  // Responses-only archived reasoning state is meaningful only to the Responses adapter.
+  // Do not leak empty synthetic assistant messages into Chat Completions/Claude/Gemini.
+  const protocolMessages = messages.filter((message) => !(
+    message.role === "assistant" &&
+    !message.content &&
+    message.responses_output_items?.length &&
+    !message.tool_calls?.length
+  ));
   // 透传供应商专属额外参数（extraBody 优先级最低，被下方标准字段覆盖）
   Object.assign(base, cfg.extraBody);
 
@@ -206,7 +232,7 @@ export function buildChatBody(cfg: ResolvedConfig, messages: ChatMessage[], tool
     // Anthropic /v1/messages：system 单独提出来，其余按 role 组装
     const systemParts: string[] = [];
     const conv: any[] = [];
-    for (const m of messages) {
+    for (const m of protocolMessages) {
       if (m.role === "system") {
         systemParts.push(m.content);
       } else if (m.role === "assistant") {
@@ -255,7 +281,7 @@ export function buildChatBody(cfg: ResolvedConfig, messages: ChatMessage[], tool
     // Google Gemini generateContent：contents + systemInstruction + generationConfig
     const contents: any[] = [];
     let sysText = "";
-    for (const m of messages) {
+    for (const m of protocolMessages) {
       if (m.role === "system") {
         sysText += m.content + "\n";
       } else {
@@ -283,7 +309,7 @@ export function buildChatBody(cfg: ResolvedConfig, messages: ChatMessage[], tool
   }
 
   // openai 兼容
-  const openaiMessages = messages.map(stripUndefined);
+  const openaiMessages = protocolMessages.map(stripUndefined);
   // Prompt Caching：部分 openai 兼容网关（DeepSeek/OpenAI 等）支持在消息上加 "cache" 标记，
   // 命中后多轮固定前缀按折扣计费。不支持的服务会忽略该字段，安全无害。
   if (cfg.promptCache && openaiMessages.length > 0) {
@@ -307,7 +333,7 @@ export function buildChatBody(cfg: ResolvedConfig, messages: ChatMessage[], tool
     body.max_tokens = (cfg.extraBody.max_tokens as number) ?? 4096;
   }
   // deepseek-free-api 与官方都支持 tools 参数（官方原生；免费服务新版也已支持）。
-  if (tools.length > 0) {
+  if (tools.length > 0 && cfg.toolMode === "native" && cfg.capabilities.tools !== false) {
     body.tools = tools;
     body.tool_choice = "auto";
   }
@@ -408,136 +434,7 @@ export function stripUndefined(m: ChatMessage): any {
   return out;
 }
 
-/**
- * 非流式摘要调用（供上下文压缩使用）。
- * 免费服务（deepseek-free-api）主要支持流式；若其不支持非流式，将返回空字符串，
- * 调用方需退化为启发式压缩（见 context.ts）。
- */
-export async function summarizeConversation(text: string, override?: ModelOverride): Promise<string> {
-  let cfg;
-  try {
-    // 摘要 = 推理任务：Auto 模式下优先 flagship/pro 档；显式覆盖走指定模型
-    cfg = override ? resolveConfigFor(override, "reason") : resolveActiveConfig("reason");
-  } catch {
-    return "";
-  }
-  try {
-    const res = await fetch(cfg.endpoint, {
-      method: "POST",
-      headers: cfg.headers,
-      body: JSON.stringify({
-        model: cfg.model,
-        stream: false,
-        temperature: 0.2,
-        messages: [
-          {
-            role: "system",
-            content:
-              "你是上下文压缩模块。请将以下编程助手对话历史压缩为结构化摘要，严格保留所有关键决策、文件路径、函数/类名、未完成任务与重要事实。用中文，按以下小标题分节（无内容则省略该节）：\n" +
-              "## 目标\n## 关键决策\n## 代码改动\n## 待办事项\n## 风险与未决问题\n" +
-              "若历史以代码为主，务必保留文件路径与符号名；不要编造未出现的内容。",
-          },
-          { role: "user", content: text },
-        ],
-      }),
-    });
-    if (!res.ok) {
-      debugLogAux("summarizeConversation", cfg.endpoint, false, `HTTP ${res.status}`);
-      return "";
-    }
-    const j = await res.json();
-    return j?.choices?.[0]?.message?.content ?? "";
-  } catch (e: any) {
-    debugLogAux("summarizeConversation", cfg.endpoint, false, e?.message ?? String(e));
-    return "";
-  }
-}
-
-/**
- * 非流式「持久记忆抽取」调用（供上下文压缩时自动固化重要信息）。
- * 从将被压缩的对话历史中，提取值得长期记住的持久事实（用户偏好、项目约定、
- * 关键技术决策、文件/模块架构、未决问题、踩过的坑）。失败（无 Key、服务不可用、
- * 本地模型不配合）时返回空字符串，调用方静默跳过——保证压缩主流程不依赖此步。
- */
-export async function extractMemoryFacts(text: string): Promise<string> {
-  let cfg;
-  try {
-    cfg = resolveActiveConfig();
-  } catch {
-    return "";
-  }
-  try {
-    const res = await fetch(cfg.endpoint, {
-      method: "POST",
-      headers: cfg.headers,
-      body: JSON.stringify({
-        model: cfg.model,
-        stream: false,
-        temperature: 0.2,
-        messages: [
-          {
-            role: "system",
-            content:
-              "你是记忆抽取模块。从以下将被压缩的对话历史中，提取值得长期记住的持久事实：用户偏好与习惯、项目约定、关键技术决策、文件/模块架构、未决问题、踩过的坑。每条以 [记忆] 开头写一行，只输出 [记忆] 行，不要其他解释。若没有值得记住的，只输出 [NO_MEMORY]。",
-          },
-          { role: "user", content: text },
-        ],
-      }),
-    });
-    if (!res.ok) {
-      debugLogAux("extractMemoryFacts", cfg.endpoint, false, `HTTP ${res.status}`);
-      return "";
-    }
-    const j = await res.json();
-    return j?.choices?.[0]?.message?.content ?? "";
-  } catch (e: any) {
-    debugLogAux("extractMemoryFacts", cfg.endpoint, false, e?.message ?? String(e));
-    return "";
-  }
-}
-
-/**
- * 非流式「自我审视」调用（供 Layer 2 OnStop 反思 hook 使用）。
- * 让模型回顾本次会话，输出是否需要固化规则 / 新建技能的建议。
- * 失败（无 Key、服务不可用）时返回空字符串，调用方静默跳过。
- */
-export async function reflectConversation(prompt: string): Promise<string> {
-  let cfg;
-  try {
-    cfg = resolveActiveConfig();
-  } catch {
-    return "";
-  }
-  if (!cfg.apiKey) return "";
-  try {
-    const res = await fetch(cfg.endpoint, {
-      method: "POST",
-      headers: cfg.headers,
-      body: JSON.stringify({
-        model: cfg.model,
-        stream: false,
-        temperature: 0.3,
-        messages: [
-          {
-            role: "system",
-            content:
-              "你是编程智能体的自我审视模块。基于给定会话片段，用中文简洁输出：是否反复犯错、用户是否反复纠正、是否有高频操作可做成技能。严格按要求的格式输出。",
-          },
-          { role: "user", content: prompt },
-        ],
-      }),
-    });
-    if (!res.ok) {
-      debugLogAux("reflectConversation", cfg.endpoint, false, `HTTP ${res.status}`);
-      return "";
-    }
-    const j = await res.json();
-    return j?.choices?.[0]?.message?.content ?? "";
-  } catch (e: any) {
-    debugLogAux("reflectConversation", cfg.endpoint, false, e?.message ?? String(e));
-    return "";
-  }
-}
+export { summarizeConversation, extractMemoryFacts, reflectConversation } from "./provider-auxiliary";
 
 async function readAll(stream: any): Promise<string> {
   const reader = stream.getReader();

@@ -1,6 +1,6 @@
 # FreeSeek 现代化改造路线图（2026 Q4）
 
-> 状态：P0、P1 已完成并合并；P2 ACP 官方 SDK 互操作升级进行中  
+> 状态：P0、P1、P2 已完成并合并；P3 已实现并通过 9/9 跨平台 CI，独立 PR #4 等待正式收尾  
 > 目标：在保留现有 Agent Kernel、ToolRuntime 和多宿主能力的基础上，把 FreeSeek 从功能堆叠型 Coding Agent 收敛为可维护、协议兼容、安全可控、易于使用的本地优先 AI 开发平台。  
 > 原则：先建立可重复验证的基线，再升级协议和 Provider；不以大规模重写代替架构治理，不为追逐版本号而牺牲兼容性。
 
@@ -112,16 +112,25 @@ P1 分支已将 MCP 连接执行层迁移至官方 `@modelcontextprotocol/client
 
 **验收：** 稳定 v1 与官方独立客户端互操作通过；session/load 与 additionalDirectories 语义通过真实会话回归；v2 实验不影响 v1；能力声明与实际实现、文档、测试一致。
 
-### P3 — Provider 与模型能力现代化
+### P3 — Provider 与模型能力现代化（实现完成；独立 PR #4：`modernize/p3-responses-multi-provider`）
 
-1. 新增 OpenAI Responses API adapter，支持 typed output items、function call / function_call_output、SSE 事件流、reasoning 与 usage 映射。
-2. 保留 Chat Completions、Anthropic Messages、Gemini API 和 OpenAI-compatible 自定义端点。
-3. 引入显式 Provider/Model capability descriptor，区分工具调用、视觉、结构化输出、推理、上下文窗口、缓存和多模态输入；不再只依赖模型名称正则猜测。
-4. 统一请求超时、流空闲超时、取消、重试、限流、错误分类和 usage 记录。
-5. 明确 Responses API 的服务端状态存储策略；默认遵循 FreeSeek 本地优先原则，是否启用远端存储必须由用户显式选择。
-6. 用 mock server 建立协议契约测试；真实模型只用于代表性 A/B，不把某一厂商的行为写死进 Kernel。
+1. 新增独立 `responses` Provider 格式和 `/responses` endpoint；现有 `openai` 继续表示 Chat Completions，不改变旧配置语义。
+2. Responses adapter 使用 typed input/output items，完成 ChatMessage ↔ Responses item 映射；工具调用使用 `function_call` 与 `function_call_output`，工具执行继续统一进入 ToolRuntime。
+3. 实现 Responses SSE 事件处理：文本增量、reasoning summary、function-call arguments、response completed/incomplete/failed、usage 与取消；支持非流式摘要/记忆辅助调用。
+4. **本地优先状态策略：** 默认发送 `store:false`，不依赖 `conversation` 或 `previous_response_id`；请求 `reasoning.encrypted_content`，将需要续接的原始 Responses output items 随本地 ChatMessage/EventLog 保存。只有显式设置 `storeResponses:true` 才允许服务端存储。
+5. 增加显式模型能力描述：工具调用、视觉、推理、结构化输出、上下文窗口、最大输出 token、输入/输出模态；能力未知时保持 unknown，不用模型名称正则伪造支持结论。模型级声明覆盖 Provider 级默认值。
+6. 保留 OpenAI Chat Completions、Anthropic Messages、Gemini generateContent、OpenAI-compatible 自定义端点及本地 Ollama/LM Studio；不因新增 Responses API 改变已有 Provider 的默认协议。
+7. 统一模型能力摘要与模型切换展示；能力声明可在 `freesek.providers` 配置中编辑，明确区分协议能力与具体模型能力。
+8. 统一请求错误分类、超时、idle timeout、取消、usage 统计；Responses 专属 body 不透传 Chat Completions 的 `messages`、`max_tokens` 或 `stream_options` 字段。
+9. 使用本地 mock server 建立协议契约测试，覆盖请求/响应映射、SSE、工具往返、推理状态续接、store 默认值、错误/取消/usage；真实模型只用于代表性 A/B。
 
-**验收：** 新旧 Provider 回归通过；工具调用与流式中断恢复正确；模型能力信息可解释；本地模型与兼容网关不受影响。
+**当前审计结论：** 现有 Provider 主循环集中在 `src/provider.ts`，ChatMessage 和 EventLog 负责本地会话历史。Responses 实现将拆为独立 `src/provider-responses.ts`，通过既有 streamChat 契约接入，不复制 Agent/ToolRuntime。
+
+**实现与验收结果：PASS。** Responses `function_call` 已归一化为既有 ToolCall 契约，后续仍由共享 Agent / ToolRuntime 执行；`function_call_output` 在下一轮请求中按原始 call_id 回传。17 项新增 Responses mock-server 契约测试全部通过，覆盖 typed input/output、工具往返映射、结构化输出、reasoning encrypted content、SSE、incomplete/error/cancel、usage 和本地 EventLog 持久化。现有 Chat Completions / Anthropic / Gemini 回归保持通过。
+
+**跨平台验收：PASS。** CI [43169042730](https://github.com/clonetimer/FreeSeek/actions/runs/43169042730) 的 Ubuntu / Windows / macOS × Node 22 / 24 / 26 共 9/9 环境全部通过静态与架构门禁、单元/集成测试、生产构建和产物 smoke。代表性完整测试套件为 561 项、0 FAIL；操作系统差异导致 16–21 项环境性 SKIP。独立 smoke 子套件为 3 PASS、1 SKIP。没有使用真实 API Key 或产生付费模型调用；协议正确性由本地 mock Responses 服务验证。
+
+**交付记录：** 独立 PR #4 已创建为 Draft，待最终审查后合并。
 
 ### P4 — Agent Kernel 与安全边界治理
 

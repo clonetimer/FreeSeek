@@ -49,7 +49,7 @@ export class DesktopSettingsStore {
         provider: {
           baseUrl: typeof provider.baseUrl === "string" ? provider.baseUrl : DEFAULT_SETTINGS.provider.baseUrl,
           model: typeof provider.model === "string" ? provider.model : DEFAULT_SETTINGS.provider.model,
-          format: ["openai", "claude", "gemini"].includes(String(provider.format)) ? provider.format! : "openai",
+          format: ["openai", "responses", "claude", "gemini"].includes(String(provider.format)) ? provider.format! : "openai",
           toolMode: ["native", "react"].includes(String(provider.toolMode)) ? provider.toolMode! : "native",
           authType: ["none", "bearer", "x-api-key", "x-goog-api-key"].includes(String(provider.authType)) ? provider.authType! : "none",
         },
