@@ -166,10 +166,10 @@ export function buildResponsesBody(
     store: cfg.storeResponses,
     include: Array.from(include),
     max_output_tokens: maxOutputTokens,
-    ...(typeof requestedTemperature === "number" && cfg.capabilities.reasoning === false
+    ...(typeof requestedTemperature === "number" && cfg.capabilities.reasoning !== true
       ? { temperature: requestedTemperature }
       : {}),
-    ...(typeof requestedTopP === "number" && cfg.capabilities.reasoning === false
+    ...(typeof requestedTopP === "number" && cfg.capabilities.reasoning !== true
       ? { top_p: requestedTopP }
       : {}),
   };
