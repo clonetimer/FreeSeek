@@ -52,6 +52,7 @@ import {
   getActiveSelection,
   ProviderConfig,
   ProviderFormat,
+  ModelCapabilities,
   AuthType,
   interpolateSecret,
 } from "./providers";
@@ -505,7 +506,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             }
             const apiKey = String(msg.apiKey || "");
             const toolMode = msg.toolMode === "react" ? "react" : "native";
-            const format: ProviderFormat = ["openai", "claude", "gemini"].includes(String(msg.format)) ? msg.format as ProviderFormat : "openai";
+            const format: ProviderFormat = ["openai", "responses", "claude", "gemini"].includes(String(msg.format)) ? msg.format as ProviderFormat : "openai";
             const authType: AuthType = ["none", "bearer", "x-api-key", "x-goog-api-key"].includes(String(msg.authType)) ? msg.authType as AuthType : "bearer";
             const autoDiscover = !!msg.autoDiscover;
             const contextWindowRaw = String(msg.contextWindow || "").trim();
@@ -522,11 +523,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             const secureApiKey = await storeProviderSecret(this.context, id, apiKey);
             const cfg = vscode.workspace.getConfiguration("freesek");
             const list = (cfg.get<ProviderConfig[]>("providers", []) || []).slice();
+            const capabilities = msg.capabilities && typeof msg.capabilities === "object" && !Array.isArray(msg.capabilities)
+              ? msg.capabilities as ModelCapabilities
+              : undefined;
             list.push({
               id, name, baseUrl, apiKey: secureApiKey, toolMode,
               models,
               format,
               authType,
+              ...(capabilities ? { capabilities } : {}),
+              ...(format === "responses" && msg.storeResponses === true ? { storeResponses: true } : {}),
               ...(autoDiscover ? { autoDiscoverModels: true } : {}),
               ...(contextWindow ? { contextWindow } : {}),
             });
@@ -2088,7 +2094,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     // 第一步：快速选择常见服务商预设（自动填充 baseUrl/格式/认证/模型），也可选「手动填写」
     const presets: Array<{
       id: string; name: string; baseUrl: string; format: ProviderFormat; authType: AuthType;
-      models: Array<{ id: string; name?: string }>; envKey?: string; autoDiscover?: boolean;
+      models: Array<{ id: string; name?: string }>; envKey?: string; autoDiscover?: boolean; capabilities?: ModelCapabilities;
     }> = [
       { id: "deepseek", name: "DeepSeek", baseUrl: DEEPSEEK_OFFICIAL_BASE_URL, format: "openai", authType: "bearer", models: [{ id: DEEPSEEK_DEFAULT_MODEL }, { id: DEEPSEEK_PRO_MODEL }], envKey: "DEEPSEEK_API_KEY" },
       { id: "openrouter", name: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", format: "openai", authType: "bearer", models: [{ id: "openrouter/auto" }], envKey: "OPENROUTER_API_KEY" },
@@ -2097,7 +2103,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       { id: "qwen", name: "阿里通义千问", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", format: "openai", authType: "bearer", models: [{ id: "qwen-plus" }], envKey: "DASHSCOPE_API_KEY" },
       { id: "zhipu", name: "智谱 GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4", format: "openai", authType: "bearer", models: [{ id: "glm-4-plus" }], envKey: "ZHIPU_API_KEY" },
       { id: "tencent-hunyuan", name: "腾讯云混元", baseUrl: "https://api.hunyuan.cloud.tencent.com/v1", format: "openai", authType: "bearer", models: [{ id: "hunyuan-turbo" }, { id: "hunyuan-pro" }], envKey: "TENCENT_HUNYUAN_API_KEY" },
-      { id: "openai", name: "OpenAI", baseUrl: "https://api.openai.com/v1", format: "openai", authType: "bearer", models: [{ id: "gpt-4o-mini" }], envKey: "OPENAI_API_KEY" },
+      { id: "openai", name: "OpenAI (Responses API)", baseUrl: "https://api.openai.com/v1", format: "responses", authType: "bearer", models: [{ id: "gpt-6.1-sol" }], envKey: "OPENAI_API_KEY", capabilities: { tools: true, vision: true, reasoning: true, structuredOutput: true, contextWindow: 1_050_000, maxOutputTokens: 128_000, inputModalities: ["text", "image"], outputModalities: ["text"] } },
+      { id: "openai-chat", name: "OpenAI (Chat Completions)", baseUrl: "https://api.openai.com/v1", format: "openai", authType: "bearer", models: [{ id: "gpt-6.1-sol" }], envKey: "OPENAI_API_KEY", capabilities: { tools: true, vision: true, reasoning: true, structuredOutput: true, contextWindow: 1_050_000, maxOutputTokens: 128_000, inputModalities: ["text", "image"], outputModalities: ["text"] } },
       { id: "ollama", name: "Ollama 本地", baseUrl: "http://127.0.0.1:11434/v1", format: "openai", authType: "none", models: [], autoDiscover: true },
       { id: "lmstudio", name: "LM Studio 本地", baseUrl: "http://127.0.0.1:1234/v1", format: "openai", authType: "none", models: [], autoDiscover: true },
     ];
@@ -2154,8 +2161,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
 
     // 协议格式：预设已定则跳过；仅「自定义」时让用户选择（决定请求体/认证头/流解析）
-    const isClaude = fmt === "claude";
-    const isGemini = fmt === "gemini";
     if (!preset) {
       const format = await vscode.window.showQuickPick(
         [
@@ -2163,6 +2168,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             label: "OpenAI 兼容 (chat/completions)",
             description: "覆盖 DeepSeek/通义/Kimi/智谱/OneAPI/中转等绝大多数服务",
             value: "openai",
+          },
+          {
+            label: "OpenAI Responses API (/responses)",
+            description: "OpenAI 原生 Responses 协议：typed output、reasoning 与原生 function calling",
+            value: "responses",
           },
           {
             label: "Claude 格式 (v1/messages)",
@@ -2181,11 +2191,27 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       fmt = format.value as ProviderFormat;
     }
 
+    const isClaude = fmt === "claude";
+    const isGemini = fmt === "gemini";
+    const isResponses = fmt === "responses";
+    let storeResponses = false;
+    if (isResponses) {
+      const storagePick = await vscode.window.showQuickPick(
+        [
+          { label: "本地优先：关闭服务端存储（推荐）", value: false },
+          { label: "允许 OpenAI 服务端存储 Responses", value: true },
+        ],
+        { placeHolder: "Responses 数据存储策略", ignoreFocusOut: true }
+      );
+      if (!storagePick) return;
+      storeResponses = storagePick.value;
+    }
+
     const toolMode = await vscode.window.showQuickPick(
       [
         {
           label: "原生 function calling",
-          description: isClaude || isGemini ? "（Claude/Gemini 当前建议用 ReAct，原生工具尚在打磨）" : "支持 tools 参数（官方/兼容服务），工具调用最可靠",
+          description: isClaude || isGemini ? "（Claude/Gemini 当前建议用 ReAct，原生工具尚在打磨）" : isResponses ? "Responses API 原生 function_call / function_call_output" : "支持 Chat Completions tools 参数（官方/兼容服务）",
           value: "native",
         },
         {
@@ -2267,6 +2293,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       models,
       format: fmt,
       authType,
+      ...(preset?.capabilities ? { capabilities: preset.capabilities } : {}),
+      ...(isResponses && storeResponses ? { storeResponses: true } : {}),
       ...(autoDiscoverModels ? { autoDiscoverModels: true } : {}),
       ...(contextWindow ? { contextWindow } : {}),
     };
