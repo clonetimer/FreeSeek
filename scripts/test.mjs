@@ -103,4 +103,15 @@ function buildWithTsc() {
 }
 
 const built = buildWithEsbuild() ?? buildWithTsc();
-process.exit(run(process.execPath, ["--test", ...built], false));
+// 固定默认并发，避免不同 runner 的 availableParallelism 差异造成 CI 时长大幅波动。
+const configuredConcurrency = Number.parseInt(process.env.FREESEEK_TEST_CONCURRENCY ?? "4", 10);
+const testConcurrency = Number.isInteger(configuredConcurrency)
+  ? Math.max(1, Math.min(configuredConcurrency, 16))
+  : 4;
+console.log(`[FreeSeek test] concurrency=${testConcurrency}, per-test timeout=120s`);
+process.exit(run(process.execPath, [
+  "--test",
+  `--test-concurrency=${testConcurrency}`,
+  "--test-timeout=120000",
+  ...built,
+], false));

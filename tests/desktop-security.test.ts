@@ -150,7 +150,7 @@ test("Desktop artifact access rejects paths and symlinks escaping authorized roo
   try {
     const inside = path.join(root, "inside.txt");
     fs.writeFileSync(inside, "inside");
-    assert.equal(resolveDesktopArtifactPath("inside.txt", [root]), inside);
+    assert.equal(resolveDesktopArtifactPath("inside.txt", [root]), fs.realpathSync(inside));
     assert.equal(previewDesktopArtifact(inside, [root]).text, "inside");
 
     const outsideFile = path.join(outside, "outside.txt");

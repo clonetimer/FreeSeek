@@ -16,7 +16,7 @@
   },
   "engines": {
     "vscode": "^1.85.0",
-    "node": ">=18"
+    "node": ">=22.0.0"
   },
   "categories": [
     "AI",

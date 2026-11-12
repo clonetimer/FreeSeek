@@ -144,6 +144,12 @@ test("Web Console completes a real Agent turn over HTTP+SSE via the ACP boundary
     await new Promise<void>((resolve) => setTimeout(resolve, 200));
     await reader.cancel();
     await pump.catch(() => undefined);
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    assert.equal(
+      (ctx.server as any).subscribers.size,
+      0,
+      "closing the SSE response must remove its subscriber and release the heartbeat timer"
+    );
     const updates = collected.map((row: any) => row?.update).filter(Boolean);
     assert.ok(
       updates.some((u: any) => u?.sessionUpdate === "agent_message_chunk"
@@ -155,6 +161,37 @@ test("Web Console completes a real Agent turn over HTTP+SSE via the ACP boundary
     const list = (await listed.json()) as { sessions: Array<{ sessionId: string }> };
     assert.ok(list.sessions.some((row) => row.sessionId === sessionId));
   } finally {
+    await ctx.close();
+  }
+});
+
+
+test("Web Console shutdown closes active SSE responses and clears their heartbeat timers", async () => {
+  const ctx = await startConsole();
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  try {
+    const child = (ctx.server as any).child as import("node:child_process").ChildProcessWithoutNullStreams;
+    assert.ok(child, "Web Console should own an ACP sidecar before shutdown");
+    const sessionId = "web-console-shutdown-sse";
+    const response = await fetch(
+      `http://127.0.0.1:${ctx.started.port}/api/session/events?sessionId=${sessionId}&token=${ctx.server.accessToken}`
+    );
+    assert.equal(response.status, 200);
+    reader = response.body!.getReader();
+    await reader.read();
+    const active = (ctx.server as any).subscribers.get(sessionId) as Set<{ res: import("node:http").ServerResponse }>;
+    assert.equal(active?.size, 1, "the SSE client should be registered before shutdown");
+    const serverResponse = [...active][0].res;
+    // Stop ends the response; cancel the browser reader concurrently so server.close can finish its socket drain.
+    const stopping = ctx.server.stop();
+    await reader.cancel();
+    await stopping;
+    assert.equal(serverResponse.writableEnded, true, "server shutdown must end the browser SSE response");
+    assert.equal((ctx.server as any).subscribers.size, 0);
+    assert.ok(child.exitCode !== null || child.signalCode !== null, "ACP sidecar process must exit");
+    assert.ok(child.stdout.destroyed && child.stderr.destroyed, "ACP sidecar stdio must be released");
+  } finally {
+    await reader?.cancel().catch(() => undefined);
     await ctx.close();
   }
 });

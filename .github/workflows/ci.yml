@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - "modernize/**"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify / ${{ matrix.os }} / Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: 22
+          - os: ubuntu-latest
+            node: 24
+          - os: ubuntu-latest
+            node: 26
+          - os: windows-latest
+            node: 22
+          - os: windows-latest
+            node: 24
+          - os: windows-latest
+            node: 26
+          - os: macos-latest
+            node: 22
+          - os: macos-latest
+            node: 24
+          - os: macos-latest
+            node: 26
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Static and architecture gates
+        run: npm run check
+
+      - name: Unit and integration tests
+        timeout-minutes: 10
+        run: npm test
+
+      - name: Production build and artifact smoke
+        run: npm run smoke

@@ -19,7 +19,7 @@ npm install -g ./freeseek-copilot-0.18.0.tgz
 freeseek help
 ```
 
-Node.js 要求 `>=18`。
+Node.js 要求 `>=22.0.0`；CI 持续验证 Node 22、24、26。
 
 ## 统一命令入口
 
