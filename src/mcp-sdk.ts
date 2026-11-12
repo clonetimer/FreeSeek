@@ -269,19 +269,17 @@ export class McpConnection {
     } catch (error) {
       await legacyClient.close().catch(() => undefined);
       this.client = null;
-      throw new Error(
-        `MCP Streamable HTTP is unavailable and legacy SSE fallback failed: ${describeError(error)}`,
-        { cause: error }
+      const combined = new Error(
+        `MCP Streamable HTTP is unavailable and legacy SSE fallback failed: ${describeError(error)}`
       );
+      (combined as Error & { cause?: unknown }).cause = error;
+      throw combined;
     }
   }
 
   private requireClient(): Client {
-    if (!this.client || !this.connected && !this.client.getServerCapabilities()) {
-      // During connect(), the client is available before the wrapper is marked ready.
-      if (!this.client) throw new Error(`MCP server "${this.name}" 未连接`);
-    }
-    return this.client!;
+    if (!this.client) throw new Error(`MCP server "${this.name}" 未连接`);
+    return this.client;
   }
 
   async readResource(uri: string, signal?: AbortSignal): Promise<string> {
