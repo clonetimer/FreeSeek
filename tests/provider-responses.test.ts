@@ -151,6 +151,42 @@ test("Responses omits encrypted reasoning include for models explicitly without 
   assert.deepEqual(body.include, []);
 });
 
+test("Responses maps Chat Completions response_format to text.format", () => {
+  const cfg = buildResolvedConfig(provider({
+    extraBody: {
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "project_summary",
+          strict: true,
+          schema: { type: "object", properties: { summary: { type: "string" } }, required: ["summary"], additionalProperties: false },
+        },
+      },
+    },
+  }), "gpt-6.1-sol");
+  const body = buildResponsesBody(cfg, [{ role: "user", content: "Summarize." }], []);
+  assert.deepEqual(body.text, {
+    format: {
+      type: "json_schema",
+      name: "project_summary",
+      strict: true,
+      schema: { type: "object", properties: { summary: { type: "string" } }, required: ["summary"], additionalProperties: false },
+    },
+  });
+  assert.equal(body.response_format, undefined);
+});
+
+test("Responses rejects structured output when the model explicitly lacks support", () => {
+  const cfg = buildResolvedConfig(provider({
+    capabilities: { structuredOutput: false },
+    extraBody: { response_format: { type: "json_object" } },
+  }), "gpt-6.1-sol");
+  assert.throws(
+    () => buildResponsesBody(cfg, [{ role: "user", content: "Return JSON." }], []),
+    /without structured-output capability/
+  );
+});
+
 test("Responses server-side storage requires explicit provider opt-in", () => {
   const cfg = buildResolvedConfig(provider({ storeResponses: true }), "gpt-6.1-sol");
   const body = buildResponsesBody(cfg, [{ role: "user", content: "hello" }], []);
