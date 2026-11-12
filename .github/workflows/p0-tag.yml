@@ -28,5 +28,7 @@ jobs:
             exit 0
           fi
           git cat-file -e "$TARGET_SHA^{commit}"
+          git config user.name "clonetimer"
+          git config user.email "115241403+clonetimer@users.noreply.github.com"
           git tag -a "$TAG" "$TARGET_SHA" -m "FreeSeek 0.26.0 P0 frozen cross-platform baseline"
           git push origin "refs/tags/$TAG"
