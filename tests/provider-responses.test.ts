@@ -131,6 +131,23 @@ test("Responses rejects images when declared input modalities exclude image", ()
   );
 });
 
+test("legacy Chat Completions does not receive archived Responses-only reasoning messages", () => {
+  const cfg = buildResolvedConfig(provider({ format: "openai" }), "legacy-model");
+  const body = buildChatBody(cfg, [
+    { role: "system", content: "System" },
+    {
+      role: "assistant",
+      content: "",
+      responses_output_items: [{ type: "reasoning", id: "rs_archived", encrypted_content: "opaque" }],
+    },
+    { role: "user", content: "Continue." },
+  ], []);
+  assert.deepEqual(body.messages, [
+    { role: "system", content: "System" },
+    { role: "user", content: "Continue." },
+  ]);
+});
+
 test("Responses request defaults to stateless storage and maps max_tokens to max_output_tokens", () => {
   const cfg = buildResolvedConfig(provider({
     capabilities: { reasoning: true },
