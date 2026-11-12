@@ -11,6 +11,8 @@ FreeSeek 通过 Provider 抽象层接入各种 AI 服务，支持 OpenAI Chat Co
 | `claude` | `/v1/messages` | `x-api-key: <key>` + `anthropic-version` | Anthropic Claude |
 | `gemini` | `/v1beta/models/:model:generateContent` | `x-goog-api-key: <key>` | Google Gemini |
 
+OpenAI 的 GPT-6.1 Sol 等推理模型应使用 `responses` 格式获得原生 function calling；其 Chat Completions 接口不提供同等的原生工具调用能力。若模型声明 `capabilities.tools:false`，FreeSeek 不会发送原生工具定义，而会切换到 ReAct 文本协议。
+
 每个 Provider 项还支持：
 
 - **`headers`**：自定义请求头（含 `${env:VAR}` 插值）。
