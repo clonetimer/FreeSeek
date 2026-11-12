@@ -175,14 +175,24 @@ export class McpConnection {
       await this.connectHttp();
     }
     const client = this.requireClient();
-    const tools = await client.listTools(undefined, { signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS) });
+    const toolsSignal = AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS);
+    // SDK v2 correctly honors server capability declarations. A number of
+    // existing legacy servers omit capabilities.tools/resources/prompts while
+    // still implementing the corresponding list methods. Preserve FreeSeek's
+    // previous best-effort behavior only for negotiated legacy connections.
+    const tools = client.getProtocolEra() === "legacy" && !client.getServerCapabilities()?.tools
+      ? await client.request({ method: "tools/list" }, { signal: toolsSignal })
+      : await client.listTools(undefined, { signal: toolsSignal });
     this.tools = (tools.tools ?? []).map((tool) => ({
       name: tool.name,
       description: tool.description ?? "",
       inputSchema: tool.inputSchema ?? { type: "object", properties: {} },
     }));
     try {
-      const result = await client.listResources(undefined, { signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS) });
+      const signal = AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS);
+      const result = client.getProtocolEra() === "legacy" && !client.getServerCapabilities()?.resources
+        ? await client.request({ method: "resources/list" }, { signal })
+        : await client.listResources(undefined, { signal });
       this.resources = (result.resources ?? []).map((resource) => ({
         uri: resource.uri,
         name: resource.name ?? resource.uri,
@@ -192,7 +202,10 @@ export class McpConnection {
       this.log.warn?.(`[FreeSeek MCP] ${this.name} resources/list unavailable: ${describeError(error)}`);
     }
     try {
-      const result = await client.listPrompts(undefined, { signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS) });
+      const signal = AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS);
+      const result = client.getProtocolEra() === "legacy" && !client.getServerCapabilities()?.prompts
+        ? await client.request({ method: "prompts/list" }, { signal })
+        : await client.listPrompts(undefined, { signal });
       this.prompts = (result.prompts ?? []).map((prompt) => ({
         name: prompt.name,
         description: prompt.description ?? undefined,
