@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptions } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 import { NdJsonRpcPeer } from "../acp/protocol";
+import type { AuthType, ProviderFormat } from "../../providers";
 
 /** Provider/runtime launch options used by the Desktop Host to start FreeSeek ACP. */
 export interface DesktopAcpLaunchOptions {
@@ -9,9 +10,9 @@ export interface DesktopAcpLaunchOptions {
   readonly baseUrl: string;
   readonly apiKey?: string;
   readonly model: string;
-  readonly format?: "openai" | "claude" | "gemini";
+  readonly format?: ProviderFormat;
   readonly toolMode?: "native" | "react";
-  readonly authType?: "none" | "bearer" | "x-api-key" | "x-goog-api-key";
+  readonly authType?: AuthType;
   readonly sessionDir: string;
   readonly allowShell?: boolean;
   readonly allowNetwork?: boolean;
