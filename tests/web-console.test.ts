@@ -170,6 +170,8 @@ test("Web Console shutdown closes active SSE responses and clears their heartbea
   const ctx = await startConsole();
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   try {
+    const child = (ctx.server as any).child as import("node:child_process").ChildProcessWithoutNullStreams;
+    assert.ok(child, "Web Console should own an ACP sidecar before shutdown");
     const sessionId = "web-console-shutdown-sse";
     const response = await fetch(
       `http://127.0.0.1:${ctx.started.port}/api/session/events?sessionId=${sessionId}&token=${ctx.server.accessToken}`
@@ -186,6 +188,8 @@ test("Web Console shutdown closes active SSE responses and clears their heartbea
     await stopping;
     assert.equal(serverResponse.writableEnded, true, "server shutdown must end the browser SSE response");
     assert.equal((ctx.server as any).subscribers.size, 0);
+    assert.ok(child.exitCode !== null || child.signalCode !== null, "ACP sidecar process must exit");
+    assert.ok(child.stdout.destroyed && child.stderr.destroyed, "ACP sidecar stdio must be released");
   } finally {
     await reader?.cancel().catch(() => undefined);
     await ctx.close();
