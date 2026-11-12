@@ -2,7 +2,7 @@
 import { cachedProviderSecret } from "./provider-secrets";
 import { DEEPSEEK_DEFAULT_MODEL, DEEPSEEK_OFFICIAL_BASE_URL } from "./deepseek";
 import { getModelCapabilities, modelCapabilitySummary } from "./model-capabilities";
-import type { ModelCapabilities } from "./model-capabilities";
+import type { ModelCapabilities, ModelModality } from "./model-capabilities";
 import { inferTaskProfile } from "./provider-task-profile";
 import type { TaskProfile } from "./provider-task-profile";
 export { getModelCapabilities, modelCapabilitySummary, inferTaskProfile };
