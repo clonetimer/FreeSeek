@@ -259,7 +259,7 @@
               ]
             }
           ],
-          "description": "多提供商配置（数组）。每项：id/name/baseUrl/apiKey(支持 ${env:VAR} 或 ${setting:freesek.xxx} 插值)/toolMode(native=原生 function calling | react=ReAct 文本协议)/models[](每项 {id, name?})。可在设置直接编辑，或运行「FreeSeek: 添加提供商」向导。当前选中的 {providerId, modelId} 存于 freesek.activeModel。"
+          "description": "多提供商配置（数组）。每项：id/name/baseUrl/apiKey(支持 ${env:VAR} 或 ${setting:freesek.xxx} 插值)/toolMode/models[](每项 {id, name?, capabilities?})/format(openai=Chat Completions, responses=OpenAI Responses API, claude, gemini)/capabilities(可选能力默认值，模型级声明覆盖)/storeResponses(仅 Responses API，默认 false；显式 true 才允许服务端存储)。能力字段包括 tools、vision、reasoning、structuredOutput、promptCaching、contextWindow、maxOutputTokens、inputModalities、outputModalities；未声明表示 unknown。可在设置直接编辑，或运行「FreeSeek: 添加提供商」向导。当前选中的 {providerId, modelId} 存于 freesek.activeModel。"
         },
         "freesek.activeModel": {
           "type": "object",
