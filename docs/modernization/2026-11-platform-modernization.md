@@ -70,7 +70,7 @@ Desktop ─┘                                      │
 3. 每个矩阵执行 `npm ci`、`npm run check`、`npm test`、`npm run smoke`。
 4. 固定本次主干提交与 CI 结果，失败项先分类，不以跳过测试制造绿色结果。
 
-**验收结果：PASS。** 9/9 环境通过：Ubuntu / Windows / macOS × Node 22 / 24 / 26。Linux Node 24 共 538 项测试，522 PASS、16 SKIP、0 FAIL；macOS 的 Linux 专属沙箱能力按平台条件跳过。
+**验收结果：PASS。** PR #1 已合并至 main；冻结标签 `v0.26.0-p0-frozen` 指向合并提交 `0355c6508fb78da71eefdf7ccadb7030eac4ac80`。9/9 环境通过：Ubuntu / Windows / macOS × Node 22 / 24 / 26。Linux Node 24 共 538 项测试，522 PASS、16 SKIP、0 FAIL；macOS 的 Linux 专属沙箱能力按平台条件跳过。
 
 本轮 CI 还修复了三类跨平台问题：
 - Windows 符号链接测试改用真实存在的外部目录与 Junction，避免把 POSIX `/etc` 当成 Windows 路径。
@@ -78,7 +78,7 @@ Desktop ─┘                                      │
 - Web Console 关闭 SSE 心跳计时器，并在 ACP sidecar 关闭时先结束 stdin，让 POSIX 子进程完成 EOF 优雅退出；SIGTERM / SIGKILL 仅作为兜底。
 - 测试运行器固定默认并发为 4，并为单项测试设置 120 秒上限，避免不同 CI runner 并行度差异造成耗时不可控。
 
-### P1 — MCP 协议现代化（实现中）
+### P1 — MCP 协议现代化（实现中；独立分支 `modernize/p1-mcp-sdk-v2`）
 
 P1 分支已将 MCP 连接执行层迁移至官方 `@modelcontextprotocol/client` v2.4.0。原 `McpManager`、工具命名与 Agent ToolRuntime 路由保持不变；新 adapter 使用 SDK 处理 JSON-RPC、stdio / Streamable HTTP / SSE、协议协商、分页、取消与 list-changed 通知。SDK v2 实现 MCP 2026-07-28 规范，并提供旧协议版本协商。
 
@@ -91,6 +91,8 @@ P1 分支已将 MCP 连接执行层迁移至官方 `@modelcontextprotocol/client
 5. 以官方 SDK v2 server fixture、MCP Inspector 和独立客户端建立新旧协议互操作测试。
 6. MCP SDK v2 要求 TypeScript 6.0 或更新版本；P1 已升级 TypeScript 6、Node 22 类型与 VS Code API 类型，并将类型检查切换为 Bundler resolution，以保留当前 ESM/CJS 混合构建。最低运行环境同步提升为 Node.js 22、VS Code 1.101。
 7. 更新 MCP 管理界面：显示协商版本、传输、能力、连接状态、工具与资源缓存状态。
+
+**当前实现：** 新增 `src/mcp-sdk.ts` 官方 SDK adapter，`McpManager` / ToolRuntime 路由契约保持不变；已接入 stdio、Streamable HTTP 自动协商与 legacy SSE 受控回退，包含工具/资源/Prompt、list-changed、请求超时与取消。Node 22+、TypeScript 6、VS Code 1.101+ 运行时基线已对齐。
 
 **当前专项测试：** 已新增现代 Streamable HTTP、旧 stdio、旧 SSE-only、认证失败不降级、环境变量白名单等回归测试。跨平台 CI 正在验证；只有全部受支持环境通过，P1 才能收尾。
 
