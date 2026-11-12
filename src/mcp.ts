@@ -54,6 +54,7 @@ export class McpManager {
           this.conns.set(s.name, conn);
           this.log.info?.(`[FreeSeek MCP] 已连接 server: ${s.name}（${conn.tools.length} 个工具）`);
         } catch (e: any) {
+          conn.dispose();
           this.log.warn?.(`[FreeSeek MCP] server "${s.name}" 连接失败：${e?.message ?? e}`);
         }
       }
