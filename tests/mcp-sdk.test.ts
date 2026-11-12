@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as http from "node:http";
 import type { AddressInfo } from "node:net";
+import { SdkErrorCode, SdkHttpError } from "@modelcontextprotocol/client";
 import { McpConnection, isLegacySseFallbackError } from "../src/mcp-sdk";
 
 const modernMeta = {
@@ -219,11 +220,13 @@ test("MCP SDK v2: authentication failures never downgrade to legacy SSE", async 
 });
 
 test("MCP SDK v2: SSE fallback classifier only accepts narrow legacy HTTP statuses", () => {
-  const statusError = (status: number): Error & { status: number } => {
-    const error = new Error(`HTTP ${status}`) as Error & { status: number };
-    error.status = status;
-    return error;
-  };
-  assert.equal(isLegacySseFallbackError(statusError(405)), false, "plain errors must not trigger transport downgrade");
+  const httpError = (status: number): SdkHttpError =>
+    new SdkHttpError(SdkErrorCode.EraNegotiationFailed, `HTTP ${status}`, { status });
+  for (const status of [404, 405, 406, 415]) {
+    assert.equal(isLegacySseFallbackError(httpError(status)), true, `HTTP ${status} is a legacy transport signal`);
+  }
+  for (const status of [400, 401, 403, 429, 500, 501, 503]) {
+    assert.equal(isLegacySseFallbackError(httpError(status)), false, `HTTP ${status} must not trigger transport downgrade`);
+  }
   assert.equal(isLegacySseFallbackError(new Error("network failure")), false);
 });
