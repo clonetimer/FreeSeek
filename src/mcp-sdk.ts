@@ -331,10 +331,14 @@ export class McpConnection {
     return `${text}${structured}`.trim() || "(空结果)";
   }
 
-  dispose(): void {
+  async close(): Promise<void> {
     this.connected = false;
     const client = this.client;
     this.client = null;
-    if (client) void client.close().catch(() => undefined);
+    if (client) await client.close().catch(() => undefined);
+  }
+
+  dispose(): void {
+    void this.close();
   }
 }
