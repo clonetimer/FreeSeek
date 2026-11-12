@@ -37,9 +37,26 @@ function settingsHost(): ProviderSettingsHost {
  *   （免费逆向服务等不支持 tools 的服务，由 agent.ts 解析 <tool_call> 块）。
  */
 
+export type ModelModality = "text" | "image" | "audio" | "file";
+
+/** Explicit model-level capability declarations. Undefined means unknown, not unsupported. */
+export interface ModelCapabilities {
+  tools?: boolean;
+  vision?: boolean;
+  reasoning?: boolean;
+  structuredOutput?: boolean;
+  promptCaching?: boolean;
+  contextWindow?: number;
+  maxOutputTokens?: number;
+  inputModalities?: ModelModality[];
+  outputModalities?: ModelModality[];
+}
+
 export interface ModelEntry {
   id: string;
   name?: string;
+  /** Model-specific capability overrides; these take precedence over provider defaults. */
+  capabilities?: ModelCapabilities;
   /**
    * Auto 路由档次（可选）。未设置时按 name/id 启发式识别。
    *  - flagship：顶级旗舰（GPT-5/Opus/Sonnet 5 等），贵且强
@@ -58,7 +75,7 @@ export interface ModelEntry {
   strengths?: Array<"code" | "reason" | "vision" | "tools" | "chat" | "long">;
 }
 
-export type ProviderFormat = "openai" | "claude" | "gemini";
+export type ProviderFormat = "openai" | "responses" | "claude" | "gemini";
 export type AuthType = "none" | "bearer" | "x-api-key" | "x-goog-api-key";
 
 export interface ProviderConfig {
@@ -68,12 +85,17 @@ export interface ProviderConfig {
   apiKey?: string;
   toolMode?: "native" | "react";
   models: ModelEntry[];
+  /** Provider-level capability defaults; model.capabilities overrides individual fields. */
+  capabilities?: ModelCapabilities;
+  /** Responses API only: explicitly allow server-side response storage. Defaults to false. */
+  storeResponses?: boolean;
   /** 标记是否为默认提供（仅用于 UI 提示，不影响逻辑） */
   builtin?: boolean;
   /**
    * API 协议格式（决定请求体/流解析），默认 openai：
-   *  - openai：/chat/completions + Bearer（覆盖 OneAPI/中转/DeepSeek/通义/Kimi/智谱等）
-   *  - claude：/v1/messages + x-api-key + anthropic-version（含各类 Claude 中转）
+   *  - openai：/chat/completions（OpenAI-compatible 网关）
+   *  - responses：/responses（OpenAI Responses API，独立于 Chat Completions）
+   *  - claude：/v1/messages + x-api-key + anthropic-version
    *  - gemini：v1beta generateContent + x-goog-api-key
    */
   format?: ProviderFormat;
@@ -168,6 +190,10 @@ export interface ResolvedConfig {
   contextWindow?: number;
   /** 是否启用 Prompt Caching（默认 true） */
   promptCache: boolean;
+  /** Responses API server-side response storage; defaults to false (local-first). */
+  storeResponses: boolean;
+  /** Provider defaults merged with model-specific capability overrides. Undefined fields remain unknown. */
+  capabilities: ModelCapabilities;
 }
 
 /**
@@ -487,6 +513,8 @@ function guessStrengthsFromName(name: string, _provider: ProviderConfig): Array<
 /** 按 provider 的协议格式拼接完整请求端点。 */
 function buildEndpoint(base: string, format: ProviderFormat, model: string): string {
   switch (format) {
+    case "responses":
+      return `${base}/responses`;
     case "claude":
       return `${base}/v1/messages`;
     case "gemini":
@@ -517,24 +545,39 @@ function buildHeaders(provider: ProviderConfig, apiKey: string, format: Provider
 }
 
 /** 由「provider + modelId」构造完整接入配置（含 endpoint / 认证头 / 透传参数）。 */
+/** Resolve capability defaults plus model-level overrides. Unknown stays undefined. */
+export function getModelCapabilities(provider: ProviderConfig, modelId: string): ModelCapabilities {
+  const model = provider.models.find((entry) => entry.id === modelId);
+  return {
+    ...(provider.capabilities ?? {}),
+    ...(model?.capabilities ?? {}),
+    ...((model?.capabilities?.contextWindow ?? provider.contextWindow) !== undefined
+      ? { contextWindow: model?.capabilities?.contextWindow ?? provider.contextWindow }
+      : {}),
+  };
+}
+
 export function buildResolvedConfig(provider: ProviderConfig, modelId: string): ResolvedConfig {
   const base = (provider.baseUrl || "").replace(/\/+$/, "");
   const format = provider.format ?? "openai";
   const authType = provider.authType ?? "bearer";
   const apiKey = interpolateSecret(provider.apiKey);
+  const capabilities = getModelCapabilities(provider, modelId);
   return {
     providerId: provider.id,
     providerName: provider.name || provider.id,
     endpoint: buildEndpoint(base, format, modelId),
     apiKey,
     model: modelId,
-    toolMode: provider.toolMode === "react" ? "react" : "native",
+    toolMode: provider.toolMode === "react" || capabilities.tools === false ? "react" : "native",
     format,
     authType,
     headers: buildHeaders(provider, apiKey, format, authType),
     extraBody: provider.extraBody ?? {},
-    contextWindow: provider.contextWindow,
-    promptCache: provider.promptCache !== false,
+    contextWindow: capabilities.contextWindow,
+    promptCache: provider.promptCache !== false && capabilities.promptCaching !== false,
+    storeResponses: provider.storeResponses === true,
+    capabilities,
   };
 }
 
@@ -607,7 +650,20 @@ export function getActiveLabel(): string {
 export function getActiveToolMode(): "native" | "react" {
   const active = getActiveProvider();
   if (!active) return "native";
-  return active.provider.toolMode === "react" ? "react" : "native";
+  if (active.provider.toolMode === "react") return "react";
+  return getModelCapabilities(active.provider, active.modelId).tools === false ? "react" : "native";
+}
+
+/** Human-readable capability summary; omitted fields are deliberately not guessed. */
+function modelCapabilitySummary(provider: ProviderConfig, modelId: string): string {
+  const caps = getModelCapabilities(provider, modelId);
+  const parts = [provider.name];
+  if (caps.tools !== undefined) parts.push(caps.tools ? "Tools" : "No tools");
+  if (caps.vision !== undefined) parts.push(caps.vision ? "Vision" : "No vision");
+  if (caps.reasoning !== undefined) parts.push(caps.reasoning ? "Reasoning" : "No reasoning");
+  if (caps.structuredOutput !== undefined) parts.push(caps.structuredOutput ? "Structured output" : "No structured output");
+  if (caps.contextWindow !== undefined) parts.push(`${caps.contextWindow.toLocaleString()} context`);
+  return parts.join(" · ");
 }
 
 /** 生成切换模型的 QuickPick 项（跨所有 provider 的所有模型）。 */
@@ -641,7 +697,7 @@ export function buildSwitchItems(): Array<{
       items.push({
         label: `${isActive ? "$(check) " : ""}${m.name || m.id}`,
         description: m.id,
-        detail: `${p.name} · ${p.toolMode === "react" ? "ReAct 文本协议" : "原生 function calling"}`,
+        detail: modelCapabilitySummary(p, m.id),
         providerId: p.id,
         modelId: m.id,
       });
