@@ -94,11 +94,11 @@ P1 分支已将 MCP 连接执行层迁移至官方 `@modelcontextprotocol/client
 
 **当前实现：** 新增 `src/mcp-sdk.ts` 官方 SDK adapter，`McpManager` / ToolRuntime 路由契约保持不变；已接入 stdio、Streamable HTTP 自动协商与 legacy SSE 受控回退，包含工具/资源/Prompt、list-changed、请求超时与取消。Node 22+、TypeScript 6、VS Code 1.101+ 运行时基线已对齐。
 
-**验收结果：PASS。** PR #2 已合并；官方 SDK v2 adapter 与旧服务兼容层通过 Ubuntu / Windows / macOS × Node 22 / 24 / 26 的 9/9 PR CI。专项覆盖现代 Streamable HTTP、旧 stdio、旧 SSE-only、401/403 不降级、旧服务缺失 capability 声明的兼容处理、环境变量白名单、工具/资源/Prompt 调用与关闭清理。
+**验收结果：PASS。** PR #2 已合并至 main，合并提交 `2b4e0146bd07f8e2ace3114fa73498b46a4d850b`。官方 SDK v2 adapter 与旧服务兼容层通过 Ubuntu / Windows / macOS × Node 22 / 24 / 26 的 9/9 PR CI。专项覆盖现代 Streamable HTTP、旧 stdio、旧 SSE-only、401/403 不降级、旧服务缺失 capability 声明的兼容处理、环境变量白名单、工具/资源/Prompt 调用与关闭清理。
 
 **验收：** 新旧 MCP 服务均可连接；工具、资源、提示词、取消、超时、错误与权限审批均有测试；旧服务失败不会拖垮内置工具。
 
-### P2 — ACP 互操作升级（实现中；独立分支 `modernize/p2-acp-sdk-interop-2026-11`）
+### P2 — ACP 互操作升级（已完成；独立 PR #3）
 
 1. 以 ACP 稳定 v1 为默认协议基线，保持现有 FreeSeek ACP Host / Agent Kernel 边界。
 2. 将官方 `@agentclientprotocol/sdk` 2.6.0 作为开发测试依赖；默认入口使用稳定 v1，不将实验 v2 SDK 引入生产宿主。
@@ -107,6 +107,8 @@ P1 分支已将 MCP 连接执行层迁移至官方 `@modelcontextprotocol/client
 5. 保留现有自定义 ACP server transport，除非独立 SDK 互操作测试证明存在协议层缺陷；不为使用 SDK 而重写已经稳定的 Agent/Session 执行内核。
 6. ACP v2 目前处于 Draft：保持隔离，不默认启用、不替换 v1，也不把 draft 能力宣传为 Stable。
 7. 将 ACP 协议版本、FreeSeek 产品版本和 Desktop 版本分开管理，避免混用。
+
+**验收结果：PASS。** PR #3 的官方 SDK 客户端互操作测试通过；PR CI [43159475763](https://github.com/clonetimer/FreeSeek/actions/runs/43159475763) 通过 Ubuntu / Windows / macOS × Node 22 / 24 / 26 全部 9/9 环境。代表性 Ubuntu / Node 22 测试结果为 544 项测试、528 PASS、16 SKIP、0 FAIL；独立 smoke 子套件 3 PASS、1 SKIP、0 FAIL。`docs/acp.md` 已按源码修正稳定 v1 能力声明。
 
 **验收：** 稳定 v1 与官方独立客户端互操作通过；session/load 与 additionalDirectories 语义通过真实会话回归；v2 实验不影响 v1；能力声明与实际实现、文档、测试一致。
 
