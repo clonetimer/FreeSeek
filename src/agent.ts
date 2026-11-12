@@ -12,6 +12,7 @@ import {
   streamChatWithIdleTimeout,
   summarizeConversation,
 } from "./provider";
+import { copyResponsesOutputState } from "./provider-responses";
 import { ToolContext, TOOL_DEFINITIONS } from "./tools";
 import { preCompactHook, subagentStartHook } from "./hooks";
 import { usageRatio, conversationTokens, tieredCompact, BudgetTracker } from "./context";
@@ -539,43 +540,7 @@ export async function runAgent(
       content: effectiveToolCalls ? stripToolCalls(message.content ?? "") : message.content,
     };
     if (message.reasoning_content) assistantMsg.reasoning_content = message.reasoning_content;
-    if (message.responses_output_items) {
-      const outputItems = message.responses_output_items as any[];
-      const responseCallIds = new Set(
-        outputItems.filter((item) => item?.type === "function_call").map((item) => item.call_id)
-      );
-      const hasAllResponseCalls = !!effectiveToolCalls &&
-        effectiveToolCalls.every((call) => responseCallIds.has(call.id));
-      if (!effectiveToolCalls?.length || hasAllResponseCalls) {
-        assistantMsg.responses_output_items = outputItems;
-      } else {
-        // ReAct parsing can synthesize tool calls from text. Rebuild the Responses
-        // input projection so the subsequent function_call_output items still have
-        // matching function_call items, while retaining opaque reasoning state.
-        const reasoningItems = outputItems.filter((item) => item?.type === "reasoning");
-        const originalMessage = outputItems.find((item) => item?.type === "message");
-        const textItem = assistantMsg.content
-          ? {
-              ...(originalMessage ?? {}),
-              type: "message",
-              role: "assistant",
-              content: [{ type: "output_text", text: assistantMsg.content }],
-            }
-          : null;
-        const syntheticCalls = effectiveToolCalls.map((call) => ({
-          type: "function_call",
-          call_id: call.id,
-          name: call.function.name,
-          arguments: call.function.arguments,
-        }));
-        assistantMsg.responses_output_items = [
-          ...reasoningItems,
-          ...(textItem ? [textItem] : []),
-          ...syntheticCalls,
-        ];
-      }
-    }
-    if (message.responses_phase) assistantMsg.responses_phase = message.responses_phase;
+    copyResponsesOutputState(message, assistantMsg, effectiveToolCalls);
     if (effectiveToolCalls) {
       (assistantMsg as any).tool_calls = effectiveToolCalls;
     }
